@@ -7,14 +7,20 @@ from temporalio.client import Client
 from temporalio.worker import Worker
 
 from app.activities import (
-    generate_sample_plan,
+    build_itinerary,
+    load_trip,
+    save_itinerary,
     update_trip_status,
+)
+from app.ai import generate_fallback_narrative, personalize_itinerary
+from app.providers import (
+    search_activities,
+    search_flights,
+    search_hotels,
 )
 from app.workflows import PlanTripWorkflow
 
 load_dotenv()
-
-TASK_QUEUE = "voyage-trip-planning"
 
 
 async def main():
@@ -23,15 +29,22 @@ async def main():
     )
 
     with concurrent.futures.ThreadPoolExecutor(
-        max_workers=5
+        max_workers=10
     ) as executor:
         worker = Worker(
             client,
-            task_queue=TASK_QUEUE,
+            task_queue="voyage-trip-planning",
             workflows=[PlanTripWorkflow],
             activities=[
+                load_trip,
                 update_trip_status,
-                generate_sample_plan,
+                search_flights,
+                search_hotels,
+                search_activities,
+                build_itinerary,
+                personalize_itinerary,
+                generate_fallback_narrative,
+                save_itinerary,
             ],
             activity_executor=executor,
         )

@@ -1,16 +1,16 @@
 import os
 import uuid
+from typing import Annotated
 
-from fastapi import Depends, FastAPI, HTTPException, Response, status
+from fastapi import Depends, FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from temporalio.client import Client
 from temporalio.exceptions import WorkflowAlreadyStartedError
 
 from app.database import get_db
-from app.models import Trip
+from app.models import Itinerary, Trip
 from app.schemas import TripCreate, TripResponse
-
 
 app = FastAPI(
     title="Voyage Trip Service",
@@ -41,7 +41,7 @@ def health_check():
 )
 def create_trip(
     payload: TripCreate,
-    db: Session = Depends(get_db),
+    db: Annotated[Session, Depends(get_db)],
 ):
     trip = Trip(**payload.model_dump())
 
@@ -58,7 +58,7 @@ def create_trip(
 )
 def get_trip(
     trip_id: uuid.UUID,
-    db: Session = Depends(get_db),
+    db: Annotated[Session, Depends(get_db)],
 ):
     trip = db.get(Trip, trip_id)
 
@@ -76,7 +76,7 @@ def get_trip(
     response_model=list[TripResponse],
 )
 def list_trips(
-    db: Session = Depends(get_db),
+    db: Annotated[Session, Depends(get_db)],
 ):
     from sqlalchemy import select
 
@@ -96,6 +96,7 @@ async def start_trip_planning(
     # This sync helper is intentionally called in a thread
     # so we don't block FastAPI's event loop.
     from fastapi.concurrency import run_in_threadpool
+
     from app.database import SessionLocal
 
     def check_trip():
@@ -142,3 +143,24 @@ async def start_trip_planning(
         "workflow_id": workflow_id,
         "message": "Trip planning requested",
     }
+
+
+@app.get("/api/v1/trips/{trip_id}/itinerary")
+def get_itinerary(
+    trip_id: uuid.UUID,
+    db: Annotated[Session, Depends(get_db)],
+):
+    trip = db.get(Trip, trip_id)
+
+    if trip is None:
+        raise HTTPException(404, "Trip not found")
+
+    itinerary = db.get(Itinerary, trip_id)
+
+    if itinerary is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Itinerary not generated yet",
+        )
+
+    return itinerary.plan

@@ -2,6 +2,7 @@
 "use client";
 
 import { FormEvent, useState } from "react";
+import TripItinerary from "@/components/TripItinerary";
 
 type TripForm = {
   origin: string;
@@ -32,6 +33,7 @@ export default function Home() {
     preferences: [],
   });
 
+  const [tripId, setTripId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -57,6 +59,7 @@ export default function Home() {
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    setTripId(null);
 
     setLoading(true);
     setError(null);
@@ -80,6 +83,7 @@ export default function Home() {
 
       const data = await response.json();
       setResult(JSON.stringify(data, null, 2));
+      setTripId(data.id);
     } catch (err) {
       setError(
         err instanceof Error ? err.message : "Something went wrong"
@@ -240,6 +244,8 @@ export default function Home() {
             </pre>
           </section>
         )}
+
+        {tripId && <TripItinerary key={tripId} tripId={tripId} />}
       </div>
     </main>
   );

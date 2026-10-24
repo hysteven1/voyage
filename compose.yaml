@@ -3,18 +3,93 @@ services:
     image: postgres:17
     restart: unless-stopped
     environment:
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER:-voyage}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-voyage_local_dev}
+      POSTGRES_DB: ${POSTGRES_DB:-voyage}
     ports:
       - "127.0.0.1:5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      test:
+        - CMD-SHELL
+        - pg_isready -U voyage -d voyage
       interval: 5s
       timeout: 5s
       retries: 10
 
+  temporal:
+    image: temporalio/temporal:latest
+    user: "0:0"
+    entrypoint: ["temporal"]
+    command:
+      - server
+      - start-dev
+      - --ip
+      - 0.0.0.0
+      - --ui-ip
+      - 0.0.0.0
+      - --db-filename
+      - /data/temporal.db
+    ports:
+      - "127.0.0.1:7233:7233"
+      - "127.0.0.1:8233:8233"
+    volumes:
+      - temporal_data:/data
+    restart: unless-stopped
+
+  migrate:
+    build:
+      context: ./services/trip-service
+    command: ["alembic", "upgrade", "head"]
+    environment:
+      DATABASE_URL: postgresql+psycopg://voyage:${POSTGRES_PASSWORD:-voyage_local_dev}@postgres:5432/voyage
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  api:
+    build:
+      context: ./services/trip-service
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql+psycopg://voyage:${POSTGRES_PASSWORD:-voyage_local_dev}@postgres:5432/voyage
+      TEMPORAL_ADDRESS: temporal:7233
+    ports:
+      - "127.0.0.1:8000:8000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      temporal:
+        condition: service_started
+
+  worker:
+    build:
+      context: ./services/planning-worker
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql+psycopg://voyage:${POSTGRES_PASSWORD:-voyage_local_dev}@postgres:5432/voyage
+      TEMPORAL_ADDRESS: temporal:7233
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      temporal:
+        condition: service_started
+
+  web:
+    build:
+      context: ./apps/web
+    restart: unless-stopped
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8000
+    ports:
+      - "127.0.0.1:3000:3000"
+    depends_on:
+      - api
+
 volumes:
   postgres_data:
+  temporal_data:

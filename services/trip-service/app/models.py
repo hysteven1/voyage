@@ -1,8 +1,9 @@
 import uuid
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from decimal import Decimal
 
-from sqlalchemy import Date, DateTime, ForeignKey, Numeric, String, Integer, JSON
+from sqlalchemy import JSON, Date, DateTime, ForeignKey, Integer, Numeric, String
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
@@ -40,5 +41,21 @@ class Trip(Base):
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
-        default=lambda: datetime.now(timezone.utc),
+        default=lambda: datetime.now(UTC),
+    )
+
+
+class Itinerary(Base):
+    __tablename__ = "itineraries"
+
+    trip_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("trips.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+
+    plan: Mapped[dict] = mapped_column(JSONB, nullable=False)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
     )

@@ -15,7 +15,3 @@ itineraries based on budgets, dates, and preferences.
 - OpenAI API
 - Docker / Kubernetes
 - Helm / Argo CD
-
-## Status
-
-Under active development.

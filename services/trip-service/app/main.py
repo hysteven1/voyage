@@ -1,13 +1,20 @@
-from datetime import date
+import os
+import uuid
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI, HTTPException, Response, status
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field, model_validator
+from sqlalchemy.orm import Session
+from temporalio.client import Client
+from temporalio.exceptions import WorkflowAlreadyStartedError
+
+from app.database import get_db
+from app.models import Trip
+from app.schemas import TripCreate, TripResponse
 
 
 app = FastAPI(
     title="Voyage Trip Service",
-    version="0.1.0",
+    version="0.2.0",
 )
 
 app.add_middleware(
@@ -19,33 +26,119 @@ app.add_middleware(
 )
 
 
-class TripRequest(BaseModel):
-    origin: str = Field(min_length=2)
-    destination: str = Field(min_length=2)
-    start_date: date
-    end_date: date
-    travelers: int = Field(ge=1, le=20)
-    budget: float = Field(gt=0)
-    preferences: list[str] = []
-
-    @model_validator(mode="after")
-    def validate_dates(self):
-        if self.end_date < self.start_date:
-            raise ValueError("End date must be on or after start date")
-        return self
-
-
 @app.get("/api/v1/health")
-async def health_check():
+def health_check():
     return {
         "status": "ok",
         "service": "trip-service",
     }
 
 
-@app.post("/api/v1/trips", status_code=201)
-async def create_trip(trip: TripRequest):
+@app.post(
+    "/api/v1/trips",
+    response_model=TripResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_trip(
+    payload: TripCreate,
+    db: Session = Depends(get_db),
+):
+    trip = Trip(**payload.model_dump())
+
+    db.add(trip)
+    db.commit()
+    db.refresh(trip)
+
+    return trip
+
+
+@app.get(
+    "/api/v1/trips/{trip_id}",
+    response_model=TripResponse,
+)
+def get_trip(
+    trip_id: uuid.UUID,
+    db: Session = Depends(get_db),
+):
+    trip = db.get(Trip, trip_id)
+
+    if trip is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Trip not found",
+        )
+
+    return trip
+
+
+@app.get(
+    "/api/v1/trips",
+    response_model=list[TripResponse],
+)
+def list_trips(
+    db: Session = Depends(get_db),
+):
+    from sqlalchemy import select
+
+    statement = (
+        select(Trip)
+        .order_by(Trip.created_at.desc())
+        .limit(100)
+    )
+
+    return db.scalars(statement).all()
+
+
+@app.post("/api/v1/trips/{trip_id}/plan")
+async def start_trip_planning(
+    trip_id: uuid.UUID,
+):
+    # This sync helper is intentionally called in a thread
+    # so we don't block FastAPI's event loop.
+    from fastapi.concurrency import run_in_threadpool
+    from app.database import SessionLocal
+
+    def check_trip():
+        with SessionLocal() as db:
+            trip = db.get(Trip, trip_id)
+
+            if trip is None:
+                return None
+
+            return trip.status
+
+    trip_status = await run_in_threadpool(check_trip)
+
+    if trip_status is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Trip not found",
+        )
+
+    if trip_status == "completed":
+        raise HTTPException(
+            status_code=409,
+            detail="Trip planning already completed",
+        )
+
+    client = await Client.connect(
+        os.getenv("TEMPORAL_ADDRESS", "localhost:7233")
+    )
+
+    workflow_id = f"plan-trip-{trip_id}"
+
+    try:
+        await client.start_workflow(
+            "PlanTripWorkflow",
+            str(trip_id),
+            id=workflow_id,
+            task_queue="voyage-trip-planning",
+        )
+    except WorkflowAlreadyStartedError:
+        pass
+
     return {
-        "message": "Trip request received",
-        "trip": trip.model_dump(mode="json"),
+        "trip_id": str(trip_id),
+        "workflow_id": workflow_id,
+        "message": "Trip planning requested",
     }

@@ -37,6 +37,21 @@ services:
     volumes:
       - temporal_data:/data
     restart: unless-stopped
+    healthcheck:
+      test:
+        - CMD
+        - temporal
+        - operator
+        - namespace
+        - describe
+        - --namespace
+        - default
+        - --address
+        - localhost:7233
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
 
   migrate:
     build:
@@ -54,21 +69,33 @@ services:
       context: ./services/trip-service
     restart: unless-stopped
     environment:
+      SERVICE_NAME: trip-service
       DATABASE_URL: postgresql+psycopg://voyage:${POSTGRES_PASSWORD:-voyage_local_dev}@postgres:5432/voyage
       TEMPORAL_ADDRESS: temporal:7233
     ports:
       - "127.0.0.1:8000:8000"
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/health/ready', timeout=3)"
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
     depends_on:
       migrate:
         condition: service_completed_successfully
       temporal:
-        condition: service_started
+        condition: service_healthy
 
   worker:
     build:
       context: ./services/planning-worker
     restart: unless-stopped
     environment:
+      SERVICE_NAME: planning-worker
       DATABASE_URL: postgresql+psycopg://voyage:${POSTGRES_PASSWORD:-voyage_local_dev}@postgres:5432/voyage
       TEMPORAL_ADDRESS: temporal:7233
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
@@ -77,7 +104,7 @@ services:
       migrate:
         condition: service_completed_successfully
       temporal:
-        condition: service_started
+        condition: service_healthy
 
   web:
     build:
@@ -87,8 +114,19 @@ services:
       NEXT_PUBLIC_API_URL: http://localhost:8000
     ports:
       - "127.0.0.1:3000:3000"
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://localhost:3000').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
     depends_on:
-      - api
+      api:
+        condition: service_healthy
 
 volumes:
   postgres_data:

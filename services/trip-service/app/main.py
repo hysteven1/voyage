@@ -1,14 +1,21 @@
+import logging
 import os
+import time
 import uuid
 from typing import Annotated
 
-from fastapi import Depends, FastAPI, HTTPException, status
+from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import text
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
+from starlette.concurrency import run_in_threadpool
 from temporalio.client import Client
+from temporalio.common import WorkflowIDConflictPolicy, WorkflowIDReusePolicy
 from temporalio.exceptions import WorkflowAlreadyStartedError
 
-from app.database import get_db
+from app.database import engine, get_db
+from app.logging_config import configure_logging
 from app.models import Itinerary, Trip
 from app.schemas import TripCreate, TripResponse
 
@@ -17,12 +24,51 @@ app = FastAPI(
     version="0.2.0",
 )
 
+configure_logging()
+logger = logging.getLogger("voyage.api")
+
+
+@app.middleware("http")
+async def request_logging_middleware(request: Request, call_next):
+    request_id = str(uuid.uuid4())
+    start = time.perf_counter()
+    request.state.request_id = request_id
+    fields = {
+        "request_id": request_id,
+        "method": request.method,
+        "path": request.url.path,
+    }
+    try:
+        response = await call_next(request)
+    except Exception:
+        logger.exception(
+            "HTTP request failed",
+            extra={
+                **fields,
+                "duration_ms": round((time.perf_counter() - start) * 1000, 2),
+            },
+        )
+        raise
+
+    response.headers["X-Request-ID"] = request_id
+    logger.info(
+        "HTTP request completed",
+        extra={
+            **fields,
+            "status_code": response.status_code,
+            "duration_ms": round((time.perf_counter() - start) * 1000, 2),
+        },
+    )
+    return response
+
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:3000"],
     allow_credentials=True,
     allow_methods=["GET", "POST"],
     allow_headers=["*"],
+    expose_headers=["X-Request-ID"],
 )
 
 
@@ -31,6 +77,35 @@ def health_check():
     return {
         "status": "ok",
         "service": "trip-service",
+    }
+
+
+@app.get("/api/v1/health/live")
+def liveness():
+    return {
+        "status": "alive",
+        "service": "trip-service",
+    }
+
+
+@app.get("/api/v1/health/ready")
+async def readiness():
+    def check_database():
+        with engine.connect() as connection:
+            connection.execute(text("SELECT 1"))
+
+    try:
+        await run_in_threadpool(check_database)
+    except SQLAlchemyError:
+        raise HTTPException(
+            status_code=503,
+            detail="Database unavailable",
+        ) from None
+
+    return {
+        "status": "ready",
+        "service": "trip-service",
+        "database": "connected",
     }
 
 
@@ -106,15 +181,25 @@ async def start_trip_planning(
             if trip is None:
                 return None
 
-            return trip.status
+            existing_itinerary = db.get(Itinerary, trip_id)
+            return trip.status, existing_itinerary is not None
 
-    trip_status = await run_in_threadpool(check_trip)
+    trip_state = await run_in_threadpool(check_trip)
 
-    if trip_status is None:
+    if trip_state is None:
         raise HTTPException(
             status_code=404,
             detail="Trip not found",
         )
+
+    trip_status, itinerary_exists = trip_state
+
+    if itinerary_exists:
+        return {
+            "status": "completed",
+            "message": "An itinerary already exists for this trip.",
+            "trip_id": str(trip_id),
+        }
 
     if trip_status == "completed":
         raise HTTPException(
@@ -134,9 +219,14 @@ async def start_trip_planning(
             str(trip_id),
             id=workflow_id,
             task_queue="voyage-trip-planning",
+            id_conflict_policy=WorkflowIDConflictPolicy.USE_EXISTING,
+            id_reuse_policy=WorkflowIDReusePolicy.ALLOW_DUPLICATE_FAILED_ONLY,
         )
     except WorkflowAlreadyStartedError:
-        pass
+        raise HTTPException(
+            status_code=409,
+            detail="Trip planning workflow already completed",
+        ) from None
 
     return {
         "trip_id": str(trip_id),

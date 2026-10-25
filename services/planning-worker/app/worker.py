@@ -1,5 +1,6 @@
 import asyncio
 import concurrent.futures
+import logging
 import os
 
 from dotenv import load_dotenv
@@ -8,11 +9,13 @@ from temporalio.worker import Worker
 
 from app.activities import (
     build_itinerary,
+    complete_trip,
     load_trip,
     save_itinerary,
     update_trip_status,
 )
 from app.ai import generate_fallback_narrative, personalize_itinerary
+from app.logging_config import configure_logging
 from app.providers import (
     search_activities,
     search_flights,
@@ -24,6 +27,9 @@ load_dotenv()
 
 
 async def main():
+    configure_logging()
+    logger = logging.getLogger("voyage.worker")
+    logger.info("Starting Temporal planning worker")
     client = await Client.connect(
         os.getenv("TEMPORAL_ADDRESS", "localhost:7233")
     )
@@ -45,11 +51,12 @@ async def main():
                 personalize_itinerary,
                 generate_fallback_narrative,
                 save_itinerary,
+                complete_trip,
             ],
             activity_executor=executor,
         )
 
-        print("Voyage planning worker started")
+        logger.info("Voyage planning worker started")
         await worker.run()
 
 

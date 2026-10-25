@@ -108,7 +108,7 @@ def test_parsed_response_and_missing_output(data, monkeypatch, has_output):
 
 
 @pytest.mark.parametrize("ai_fails", [False, True])
-def test_workflow_preserves_plan_and_completes_after_saving(data, monkeypatch, ai_fails):
+def test_workflow_preserves_plan_and_completes_atomically(data, monkeypatch, ai_fails):
     from app import workflows
 
     original = deepcopy(data["plan"])
@@ -135,8 +135,7 @@ def test_workflow_preserves_plan_and_completes_after_saving(data, monkeypatch, a
     result = asyncio.run(workflows.PlanTripWorkflow().run("test-trip"))
     assert result == {**original, "narrative": narrative}
     assert data["plan"] == original
-    assert calls[-2:] == [
-        ("save_itinerary", result),
-        ("update_trip_status", {"trip_id": "test-trip", "status": "completed"}),
-    ]
+    assert calls[-1] == (
+        "complete_trip", {"trip_id": "test-trip", "plan": result}
+    )
     assert any(name == "generate_fallback_narrative" for name, _ in calls) == ai_fails

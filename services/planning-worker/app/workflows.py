@@ -7,8 +7,8 @@ from temporalio.common import RetryPolicy
 with workflow.unsafe.imports_passed_through():
     from app.activities import (
         build_itinerary,
+        complete_trip,
         load_trip,
-        save_itinerary,
         update_trip_status,
     )
     from app.ai import generate_fallback_narrative, personalize_itinerary
@@ -40,12 +40,12 @@ class PlanTripWorkflow:
             )
 
         try:
+            trip = await execute(load_trip, trip_id)
+
             await execute(
                 update_trip_status,
                 {"trip_id": trip_id, "status": "planning"},
             )
-
-            trip = await execute(load_trip, trip_id)
 
             # All three searches run concurrently.
             flights, hotels, activities = await asyncio.gather(
@@ -84,11 +84,9 @@ class PlanTripWorkflow:
 
             # Preserve deterministic selections and calculations.
             enriched_plan = {**plan, "narrative": narrative}
-            await execute(save_itinerary, enriched_plan)
-
             await execute(
-                update_trip_status,
-                {"trip_id": trip_id, "status": "completed"},
+                complete_trip,
+                {"trip_id": trip_id, "plan": enriched_plan},
             )
 
             return enriched_plan
@@ -99,6 +97,7 @@ class PlanTripWorkflow:
                 await execute(
                     update_trip_status,
                     {"trip_id": trip_id, "status": "failed"},
+                    timeout=15,
                 )
             except Exception:  # noqa: BLE001 - best-effort status update must not mask the original failure.
                 workflow.logger.exception(

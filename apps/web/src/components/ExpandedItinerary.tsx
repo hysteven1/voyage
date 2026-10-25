@@ -28,12 +28,16 @@ type Activity = {
   travel_minutes?: number;
   search_url: string;
   travel_hours?: number;
+  must_see?: boolean;
+  reason?: string;
 };
 export type ExpandedPlan = {
   version: 2;
   booking_source?: string;
   trip_id: string;
   currency: string;
+  route?: { location: string }[];
+  incomplete_destinations?: string[];
   data_source: string;
   legs: {
     origin: string;
@@ -54,6 +58,10 @@ export type ExpandedPlan = {
       arrival_airport: string;
       departure_time: string;
       arrival_time: string;
+      departure_timezone?: string;
+      arrival_timezone?: string;
+      departure_timezone_abbreviation?: string;
+      arrival_timezone_abbreviation?: string;
       stops: number;
       price: string;
       google_flights_url: string | null;
@@ -99,8 +107,15 @@ export type ExpandedPlan = {
     travel_minutes?: number;
     estimated_minutes?: number;
     needs_personalization?: boolean;
+    day_trip?: boolean;
+    why_visit?: string;
     activities: Activity[];
     rain_alternative: { name: string; search_url: string } | null;
+  }[];
+  destination_highlights?: {
+    location: string;
+    highlights: { name: string; reason: string }[];
+    day_trips: { name: string; reason: string; travel_minutes: number }[];
   }[];
   destination_estimates: {
     location: string;
@@ -156,6 +171,18 @@ const usd = (value: string | null | undefined) =>
         maximumFractionDigits: 2,
       }).format(Number(value));
 export default function ExpandedItinerary({ plan }: { plan: ExpandedPlan }) {
+  const incomplete = plan.incomplete_destinations?.length
+    ? plan.incomplete_destinations
+    : [
+        ...new Set(
+          plan.days
+            .filter((day) => day.needs_personalization)
+            .map((day) => day.location),
+        ),
+      ];
+  const title = plan.route?.length
+    ? plan.route.map((stop) => stop.location).join(" → ")
+    : (plan.narrative?.title ?? "Your itinerary");
   return (
     <section className="itinerary-stack" aria-label="Your itinerary">
       <Paper
@@ -168,7 +195,7 @@ export default function ExpandedItinerary({ plan }: { plan: ExpandedPlan }) {
           variant="h4"
           sx={{ fontWeight: 600, mt: 1.5, mb: 2 }}
         >
-          {plan.narrative?.title ?? "Room to explore."}
+          {title}
         </Typography>
         {plan.narrative?.summary && (
           <Typography color="text.secondary">
@@ -180,15 +207,13 @@ export default function ExpandedItinerary({ plan }: { plan: ExpandedPlan }) {
           explore. Confirm prices, availability, reviews, and accessibility
           before booking.
         </Typography>
-        {plan.suggestion_source === "offline_templates" && (
-          <Typography
-            variant="caption"
-            color="text.secondary"
-            sx={{ display: "block", mt: 1 }}
-          >
-            Neighborhood suggestions are general starting points, rather than
-            verified local recommendations.
-          </Typography>
+        {incomplete.length > 0 && (
+          <Alert severity="warning" sx={{ mt: 2 }}>
+            Activity recommendations could not be completed for{" "}
+            {incomplete.join(", ")}. Travel options are shown below, but the
+            itinerary and activity costs are incomplete. Use Edit trip details
+            to try a new plan.
+          </Alert>
         )}
       </Paper>
       <Paper component="section" className="itinerary-panel">
@@ -209,7 +234,9 @@ export default function ExpandedItinerary({ plan }: { plan: ExpandedPlan }) {
             {usd(plan.budget.total)}
           </Typography>
           <Typography variant="body2" color="text.secondary">
-            Estimated total · USD
+            {incomplete.length
+              ? "Partial trip estimate · USD"
+              : "Estimated total · USD"}
           </Typography>
         </Box>
         <dl className="itinerary-budget">
@@ -223,7 +250,11 @@ export default function ExpandedItinerary({ plan }: { plan: ExpandedPlan }) {
           ].map((key) => (
             <div key={key}>
               <dt>{key === "car" ? "Car rental" : key}</dt>
-              <dd>{usd(plan.budget[key])}</dd>
+              <dd>
+                {key === "activities" && incomplete.length
+                  ? "Incomplete"
+                  : usd(plan.budget[key])}
+              </dd>
             </div>
           ))}
         </dl>
@@ -327,40 +358,44 @@ export default function ExpandedItinerary({ plan }: { plan: ExpandedPlan }) {
                     {leg.origin} → {leg.destination}
                   </Typography>
                 </Stack>
-                <Typography
-                  variant="body2"
-                  sx={{ textTransform: "capitalize" }}
-                >
-                  {leg.mode} · {dayjs(leg.departure_date).format("MMM D")}
-                  {leg.arrival_date !== leg.departure_date &&
-                    ` – ${dayjs(leg.arrival_date).format("MMM D")}`}
-                </Typography>
-                <Typography
-                  variant="body2"
-                  color="text.secondary"
-                  sx={{ my: 1 }}
-                >
-                  About {leg.estimated_hours} hours · {usd(leg.estimated_cost)}{" "}
-                  estimated for the group
-                </Typography>
-                {leg.restrictions && (
-                  <Typography
-                    variant="caption"
-                    color="text.secondary"
-                    sx={{ display: "block", mb: 2 }}
-                  >
-                    Confirm in search: up to {leg.restrictions.max_stops}{" "}
-                    stop(s)
-                    {leg.restrictions.earliest_departure &&
-                      `; depart after ${leg.restrictions.earliest_departure}`}
-                    {leg.restrictions.latest_arrival &&
-                      `; arrive before ${leg.restrictions.latest_arrival}`}
-                    ;{" "}
-                    {leg.restrictions.allow_overnight
-                      ? "overnight allowed"
-                      : "no overnight flights"}
-                    . Times are local to each airport.
-                  </Typography>
+                {!leg.selected_flight && (
+                  <>
+                    <Typography
+                      variant="body2"
+                      sx={{ textTransform: "capitalize" }}
+                    >
+                      {leg.mode} · {dayjs(leg.departure_date).format("MMM D")}
+                      {leg.arrival_date !== leg.departure_date &&
+                        ` – ${dayjs(leg.arrival_date).format("MMM D")}`}
+                    </Typography>
+                    <Typography
+                      variant="body2"
+                      color="text.secondary"
+                      sx={{ my: 1 }}
+                    >
+                      About {leg.estimated_hours} hours ·{" "}
+                      {usd(leg.estimated_cost)} estimated for the group
+                    </Typography>
+                    {leg.restrictions && (
+                      <Typography
+                        variant="caption"
+                        color="text.secondary"
+                        sx={{ display: "block", mb: 2 }}
+                      >
+                        Confirm in search: up to {leg.restrictions.max_stops}{" "}
+                        stop(s)
+                        {leg.restrictions.earliest_departure &&
+                          `; depart after ${leg.restrictions.earliest_departure}`}
+                        {leg.restrictions.latest_arrival &&
+                          `; arrive before ${leg.restrictions.latest_arrival}`}
+                        ;{" "}
+                        {leg.restrictions.allow_overnight
+                          ? "overnight allowed"
+                          : "no overnight flights"}
+                        . Times are local to each airport.
+                      </Typography>
+                    )}
+                  </>
                 )}
                 {leg.selected_flight && (
                   <Box sx={{ mb: 2 }}>
@@ -373,10 +408,14 @@ export default function ExpandedItinerary({ plan }: { plan: ExpandedPlan }) {
                       {dayjs(leg.selected_flight.departure_time).format(
                         "MMM D, HH:mm",
                       )}{" "}
+                      {leg.selected_flight.departure_timezone_abbreviation ??
+                        "local time"}{" "}
                       → {leg.selected_flight.arrival_airport}{" "}
                       {dayjs(leg.selected_flight.arrival_time).format(
                         "MMM D, HH:mm",
-                      )}
+                      )}{" "}
+                      {leg.selected_flight.arrival_timezone_abbreviation ??
+                        "local time"}
                     </Typography>
                     <Typography variant="body2" sx={{ my: 1 }}>
                       Provider quote: {usd(leg.selected_flight.price)} ·{" "}
@@ -408,8 +447,13 @@ export default function ExpandedItinerary({ plan }: { plan: ExpandedPlan }) {
                     color="text.secondary"
                     sx={{ display: "block", mb: 1 }}
                   >
-                    No matching live flight quote was retrieved. Compare options
-                    for these dates below.
+                    {leg.selection_status === "no_matching_offer"
+                      ? "The flight search returned no options matching these preferences."
+                      : leg.selection_status === "unavailable"
+                        ? "The live flight search was unavailable. Flights may still be available; the cost shown is an estimate."
+                        : plan.booking_source === "not_configured"
+                          ? "Live flight search is not configured. The cost shown is an estimate."
+                          : "No live flight quote is attached to this saved plan. Search options below."}
                   </Typography>
                 )}
                 <Search href={leg.alternatives_url ?? leg.search_url}>
@@ -447,16 +491,20 @@ export default function ExpandedItinerary({ plan }: { plan: ExpandedPlan }) {
                 {stay.area} · {dayjs(stay.check_in).format("MMM D")} –{" "}
                 {dayjs(stay.check_out).format("MMM D")} · {stay.rooms} room(s)
               </Typography>
-              <Typography variant="body2" sx={{ mt: 1 }}>
-                {usd(stay.estimated_cost)} estimated stay total
-              </Typography>
-              <Typography
-                variant="caption"
-                color="text.secondary"
-                sx={{ display: "block", my: 1.5 }}
-              >
-                {stay.criteria}
-              </Typography>
+              {!stay.selected_stay && (
+                <>
+                  <Typography variant="body2" sx={{ mt: 1 }}>
+                    {usd(stay.estimated_cost)} estimated stay total
+                  </Typography>
+                  <Typography
+                    variant="caption"
+                    color="text.secondary"
+                    sx={{ display: "block", my: 1.5 }}
+                  >
+                    {stay.criteria}
+                  </Typography>
+                </>
+              )}
               {stay.selected_stay && (
                 <Box sx={{ mb: 2 }}>
                   <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
@@ -535,6 +583,71 @@ export default function ExpandedItinerary({ plan }: { plan: ExpandedPlan }) {
         <Typography component="h3" className="itinerary-section-title">
           Your days, with room to wander.
         </Typography>
+        {plan.destination_highlights?.map((city) => (
+          <Paper
+            component="article"
+            className="itinerary-panel"
+            key={city.location}
+            sx={{ mb: 2.5 }}
+          >
+            <Typography
+              component="h4"
+              variant="subtitle1"
+              sx={{ fontWeight: 600 }}
+            >
+              Highlights in {city.location}
+            </Typography>
+            <Stack component="ul" spacing={1.5} sx={{ pl: 2.5, mt: 2 }}>
+              {city.highlights.map((highlight) => (
+                <li key={highlight.name}>
+                  <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                    {highlight.name}
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    {highlight.reason}
+                  </Typography>
+                </li>
+              ))}
+            </Stack>
+            {city.day_trips.length > 0 && (
+              <Accordion
+                disableGutters
+                sx={{ mt: 2, "&::before": { display: "none" } }}
+              >
+                <AccordionSummary expandIcon={<ExpandMoreRounded />}>
+                  Day trips worth considering
+                </AccordionSummary>
+                <AccordionDetails>
+                  <Typography
+                    variant="body2"
+                    color="text.secondary"
+                    sx={{ mb: 2 }}
+                  >
+                    Choose a favorite to swap for a full sightseeing day. Ideas
+                    listed here are only included in the estimate when scheduled
+                    below.
+                  </Typography>
+                  <Stack spacing={2}>
+                    {city.day_trips.map((idea) => (
+                      <Box key={idea.name}>
+                        <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                          {idea.name}
+                        </Typography>
+                        <Typography variant="body2" color="text.secondary">
+                          {idea.reason}
+                        </Typography>
+                        <Typography variant="caption" color="text.secondary">
+                          About {visitLength(idea.travel_minutes)} round-trip
+                          travel
+                        </Typography>
+                      </Box>
+                    ))}
+                  </Stack>
+                </AccordionDetails>
+              </Accordion>
+            )}
+          </Paper>
+        ))}
         <Stack spacing={2.5}>
           {plan.days.map((day) => (
             <Paper
@@ -562,13 +675,34 @@ export default function ExpandedItinerary({ plan }: { plan: ExpandedPlan }) {
                   label={
                     day.kind === "arrival"
                       ? "Easy arrival"
-                      : day.kind === "full"
-                        ? "Explore"
-                        : "Travel day"
+                      : day.day_trip
+                        ? "Day trip"
+                        : day.kind === "full"
+                          ? "Explore"
+                          : "Travel day"
                   }
                   sx={{ fontSize: 10 }}
                 />
               </div>
+              {day.why_visit && (
+                <Typography
+                  variant="body2"
+                  color="text.secondary"
+                  sx={{ mb: 1.5 }}
+                >
+                  {day.why_visit}
+                </Typography>
+              )}
+              {!!day.estimated_minutes && (
+                <Typography
+                  variant="caption"
+                  color="text.secondary"
+                  sx={{ display: "block", mb: 1.5 }}
+                >
+                  About {visitLength(day.estimated_minutes)} of sightseeing and
+                  travel. Leave room for breaks.
+                </Typography>
+              )}
               {!!day.travel_minutes && (
                 <Typography variant="body2" color="text.secondary">
                   Allow about {visitLength(day.travel_minutes)} round-trip
@@ -577,13 +711,32 @@ export default function ExpandedItinerary({ plan }: { plan: ExpandedPlan }) {
               )}
               {day.activities.length === 0 && (
                 <Typography variant="body2" color="text.secondary">
-                  A little breathing room for travel, check-out, and
-                  connections.
+                  {day.needs_personalization
+                    ? "Specific activity recommendations for this day could not be loaded. No placeholder activities or visit costs have been added."
+                    : "A little breathing room for travel, check-out, and connections."}
                 </Typography>
               )}
               {day.activities.map((a) => (
                 <div className="activity-row" key={a.id}>
                   <Search href={a.search_url}>{a.name}</Search>
+                  {a.must_see && (
+                    <Chip
+                      label="Must-see"
+                      size="small"
+                      color="primary"
+                      variant="outlined"
+                      sx={{ ml: 1, fontSize: 10 }}
+                    />
+                  )}
+                  {a.reason && (
+                    <Typography
+                      variant="body2"
+                      color="text.secondary"
+                      sx={{ mt: 0.7 }}
+                    >
+                      {a.reason}
+                    </Typography>
+                  )}
                   <Typography
                     variant="body2"
                     color="text.secondary"
@@ -594,24 +747,27 @@ export default function ExpandedItinerary({ plan }: { plan: ExpandedPlan }) {
                       a.duration_minutes ?? Math.round(a.duration_hours * 60),
                     )}{" "}
                     · {usd(a.price_per_person)} per person
+                    {!!a.travel_minutes &&
+                      ` · allow ${visitLength(a.travel_minutes)} to get here`}
                     {a.travel_hours !== undefined &&
                       ` · includes about ${a.travel_hours} hours round-trip travel`}
                   </Typography>
                 </div>
               ))}
-              {plan.narrative?.days.find((d) => d.date === day.date)
-                ?.description && (
-                <Typography
-                  variant="body2"
-                  color="text.secondary"
-                  sx={{ mt: 2 }}
-                >
-                  {
-                    plan.narrative.days.find((d) => d.date === day.date)
-                      ?.description
-                  }
-                </Typography>
-              )}
+              {!day.needs_personalization &&
+                plan.narrative?.days.find((d) => d.date === day.date)
+                  ?.description && (
+                  <Typography
+                    variant="body2"
+                    color="text.secondary"
+                    sx={{ mt: 2 }}
+                  >
+                    {
+                      plan.narrative.days.find((d) => d.date === day.date)
+                        ?.description
+                    }
+                  </Typography>
+                )}
               {day.rain_alternative && (
                 <Accordion
                   disableGutters

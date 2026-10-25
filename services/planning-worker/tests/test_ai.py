@@ -135,7 +135,19 @@ def test_workflow_preserves_plan_and_completes_atomically(data, monkeypatch, ai_
     result = asyncio.run(workflows.PlanTripWorkflow().run("test-trip"))
     assert result == {**original, "narrative": narrative}
     assert data["plan"] == original
-    assert calls[-1] == (
-        "complete_trip", {"trip_id": "test-trip", "plan": result}
-    )
+    assert calls[-1] == ("complete_trip", {"trip_id": "test-trip", "plan": result})
     assert any(name == "generate_fallback_narrative" for name, _ in calls) == ai_fails
+
+
+def test_route_title_uses_structured_locations_not_generated_separators():
+    plan = {
+        "route": [
+            {"location": "Tokyo, Japan"},
+            {"location": "Kyoto, Japan"},
+            {"location": "Osaka, Japan"},
+        ]
+    }
+    assert (
+        ai.route_title(plan, {"destination": "Japan"})
+        == "Tokyo, Japan → Kyoto, Japan → Osaka, Japan"
+    )

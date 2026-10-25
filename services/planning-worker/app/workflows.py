@@ -50,7 +50,12 @@ class PlanTripWorkflow:
             )
 
             if trip.get("options"):
-                suggestions = await execute(suggest_places, trip, timeout=90)
+                suggestions = await execute(
+                    suggest_places,
+                    trip,
+                    timeout=150
+                    * max(1, (len(trip["options"].get("route", [])) + 3) // 4),
+                )
                 plan = await execute(
                     build_itinerary, {"trip": trip, "suggestions": suggestions}
                 )
@@ -73,7 +78,9 @@ class PlanTripWorkflow:
 
             if trip.get("options") and workflow.patched("live-travel-selection-v1"):
                 plan = await execute(
-                    select_travel_options, {"trip": trip, "plan": plan}, timeout=300
+                    select_travel_options,
+                    {"trip": trip, "plan": plan, "suggestions": suggestions},
+                    timeout=300,
                 )
 
             # Personalization is optional enrichment.

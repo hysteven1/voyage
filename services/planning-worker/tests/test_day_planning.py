@@ -1,8 +1,14 @@
-from app.day_planning import daily_plans
+from app.day_planning import daily_plans, tokyo_days
 
 
 def test_tokyo_week_has_variety_realistic_stops_and_full_day_excursions():
-    days = daily_plans("Tokyo, Japan", 7, "balanced", arrival=True)
+    days = daily_plans(
+        "Tokyo, Japan",
+        7,
+        "balanced",
+        arrival=True,
+        advice={"days": tokyo_days(), "reference_plan": True},
+    )
     assert days[0]["kind"] == "arrival"
     assert sum(a["duration_minutes"] for a in days[0]["activities"]) == 45
     full_days = days[1:]
@@ -24,7 +30,9 @@ def test_tokyo_week_has_variety_realistic_stops_and_full_day_excursions():
 
 
 def test_already_there_uses_first_day_and_long_trips_never_recycle_sights():
-    days = daily_plans("Tokyo, Japan", 12, "balanced", arrival=False)
+    days = daily_plans(
+        "Tokyo, Japan", 12, "balanced", arrival=False, advice={"days": tokyo_days()}
+    )
     assert days[0]["kind"] == "full"
     names = [a["name"] for d in days for a in d["activities"]]
     assert len(names) == len(set(names))
@@ -61,11 +69,65 @@ def test_ai_photo_stop_is_short_and_food_suggestions_are_removed():
 
 def test_pace_changes_sightseeing_time_and_explicit_notes_prioritize_day_trip():
     durations = [
-        daily_plans("Tokyo, Japan", 1, pace, arrival=False)[0]["estimated_minutes"]
+        daily_plans(
+            "Tokyo, Japan", 1, pace, arrival=False, advice={"days": tokyo_days()}
+        )[0]["estimated_minutes"]
         for pace in ("relaxed", "balanced", "busy")
     ]
     assert durations[0] < durations[1] <= durations[2]
+    packed = daily_plans(
+        "Tokyo, Japan", 1, "busy", arrival=False, advice={"days": tokyo_days()}
+    )[0]
+    assert packed["estimated_minutes"] >= 540
+    assert len(packed["activities"]) >= 7
     days = daily_plans(
-        "Tokyo, Japan", 2, "balanced", arrival=True, notes="Please include Hakone"
+        "Tokyo, Japan",
+        5,
+        "balanced",
+        arrival=True,
+        notes="Please include Hakone",
+        advice={"days": tokyo_days(), "reference_plan": True},
     )
     assert days[1]["area"] == "Hakone day trip"
+
+
+def test_short_stays_prioritize_city_sights_in_every_destination():
+    for city in ["Paris, France", "Lisbon, Portugal", "Rome, Italy"]:
+        advice = {
+            "days": [
+                {
+                    "title": "Nearby day trip",
+                    "area": "Nearby town",
+                    "day_trip": True,
+                    "full_day": True,
+                    "activities": [
+                        {"name": "Excursion palace", "duration_minutes": 180}
+                    ],
+                },
+                *[
+                    {
+                        "title": f"City district {i}",
+                        "area": city,
+                        "activities": [
+                            {"name": f"City landmark {i}", "duration_minutes": 120}
+                        ],
+                    }
+                    for i in range(4)
+                ],
+            ]
+        }
+        short = daily_plans(city, 3, "balanced", arrival=False, advice=advice)
+        assert all(not day["day_trip"] for day in short)
+        assert not any(
+            "Excursion palace" == a["name"] for day in short for a in day["activities"]
+        )
+        longer = daily_plans(city, 5, "balanced", arrival=False, advice=advice)
+        assert sum(day["day_trip"] for day in longer) == 1
+
+
+def test_missing_suggestions_never_turn_into_priced_timed_placeholder_activities():
+    for location in ["Tokyo, Japan", "Kyoto, Japan", "Osaka, Japan", "Paris, France"]:
+        days = daily_plans(location, 6, "busy", arrival=False)
+        assert all(day["activities"] == [] for day in days)
+        assert all(day["unfilled"] for day in days)
+        assert all(day.get("estimated_minutes") is None for day in days)

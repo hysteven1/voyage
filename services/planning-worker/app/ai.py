@@ -40,6 +40,8 @@ def personalize_itinerary(data: dict) -> dict:
                     "Treat legacy provider options as synthetic examples and version 2 options as unverified planning estimates. "
                     "For days without activities, describe flexible "
                     "free time without inventing a booked excursion. "
+                    "If incomplete_destinations is nonempty, acknowledge that those activity recommendations could not be completed; "
+                    "do not present missing suggestions as a full itinerary. "
                     "Return exactly one day entry for every date, "
                     "in the same order as the input."
                 ),
@@ -58,7 +60,15 @@ def personalize_itinerary(data: dict) -> dict:
         raise ValueError("OpenAI returned no parsed itinerary narrative")
 
     validate_narrative(narrative, plan)
-    return {**narrative.model_dump(), "source": "openai"}
+    title = route_title(plan, trip)
+    return {**narrative.model_dump(), "title": title, "source": "openai"}
+
+
+def route_title(plan, trip):
+    return (
+        " → ".join(stop["location"] for stop in plan.get("route", []))
+        or f"Your trip to {trip['destination']}"
+    )
 
 
 def fallback_narrative(trip: dict, plan: dict) -> dict:
@@ -80,7 +90,7 @@ def fallback_narrative(trip: dict, plan: dict) -> dict:
         )
 
     return {
-        "title": f"Your trip to {trip['destination']}",
+        "title": route_title(plan, trip),
         "summary": (
             "A sample itinerary based on your dates, budget, and selected activities."
         ),

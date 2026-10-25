@@ -97,7 +97,26 @@ def test_pace_and_rain_swaps(trip):
     counts = []
     for pace in ["relaxed", "balanced", "busy"]:
         trip["options"]["pace"] = pace
-        plan = build_plan(approved(trip))
+        advice = {
+            "Paris, France": {
+                "days": [
+                    {
+                        "title": "Museum district",
+                        "area": "City center",
+                        "activities": [
+                            {
+                                "name": f"Museum collection {i}",
+                                "duration_minutes": 60,
+                                "travel_minutes": 15,
+                                "estimated_price": 10,
+                            }
+                            for i in range(10)
+                        ],
+                    }
+                ]
+            }
+        }
+        plan = build_plan(approved(trip), advice)
         counts.append(
             len(next(d for d in plan["days"] if d["kind"] == "full")["activities"])
         )
@@ -282,6 +301,7 @@ def test_valid_ai_route_is_reviewable(trip, monkeypatch):
 
 
 def test_route_conflicts_are_returned_for_review(trip, monkeypatch):
+    trip["options"]["notes"] = "I must return on November 10."
     monkeypatch.setenv("OPENAI_API_KEY", "test-only")
     monkeypatch.setattr(
         planning,
@@ -294,7 +314,13 @@ def test_route_conflicts_are_returned_for_review(trip, monkeypatch):
             ],
             return_travel_days=0,
             assumptions=[],
-            conflicts=["Notes require returning after the end date"],
+            conflicts=[
+                planning.NoteConflict(
+                    message="Notes require returning after the end date",
+                    note_excerpt="I must return on November 10.",
+                    constraint="dates",
+                )
+            ],
         ),
     )
     result = main.route_proposal(TripCreate.model_validate(trip))
@@ -406,3 +432,85 @@ def test_global_flight_preferences_apply_to_every_flight_leg(trip):
         for leg in plan["legs"]
         if leg["mode"] == "flight"
     )
+
+
+@pytest.mark.parametrize("notes", ["", "Prefer a convenient hotel."])
+def test_optional_interests_cannot_become_route_conflicts(trip, monkeypatch, notes):
+    trip["preferences"] = ["Adventure & hiking"]
+    trip["options"]["notes"] = notes
+    monkeypatch.setenv("OPENAI_API_KEY", "test-only")
+    monkeypatch.setattr(
+        planning,
+        "ai_route",
+        lambda _: planning.RouteSuggestion(
+            stops=[
+                planning.SuggestedStop(
+                    input_index=0, city="Paris, France", mode="flight", travel_days=0
+                )
+            ],
+            return_travel_days=0,
+            assumptions=[],
+            conflicts=[
+                planning.NoteConflict(
+                    message="Traveler's preference for adventure & hiking may not align with urban activities.",
+                    note_excerpt="Adventure & hiking",
+                    constraint="required_stop",
+                )
+            ],
+        ),
+    )
+    result = propose_route(trip)
+    assert result["conflicts"] == []
+    assert result["source"] == "ai_suggestion"
+
+
+def test_route_request_excludes_optional_activity_interests(trip, monkeypatch):
+    import io
+    import json
+
+    response = planning.RouteSuggestion(
+        stops=[
+            planning.SuggestedStop(
+                input_index=0, city="Paris, France", mode="flight", travel_days=0
+            )
+        ],
+        return_travel_days=0,
+        assumptions=[],
+        conflicts=[],
+    )
+
+    def capture(request, **kwargs):
+        body = json.loads(request.data)
+        route_input = json.loads(body["input"][1]["content"])
+        assert "preferences" not in route_input
+        assert "pace" not in route_input["options"]
+        return io.BytesIO(
+            json.dumps(
+                {
+                    "output": [
+                        {
+                            "content": [
+                                {
+                                    "type": "output_text",
+                                    "text": response.model_dump_json(),
+                                }
+                            ]
+                        }
+                    ]
+                }
+            ).encode()
+        )
+
+    monkeypatch.setenv("OPENAI_API_KEY", "test-only")
+    monkeypatch.setattr(planning, "urlopen", capture)
+    assert planning.ai_route(trip).conflicts == []
+
+
+def test_planning_model_supports_quality_model_and_legacy_override(monkeypatch):
+    monkeypatch.delenv("OPENAI_PLANNING_MODEL", raising=False)
+    assert planning.planning_model_options() == {
+        "model": "gpt-6.1-sol",
+        "reasoning": {"effort": "medium"},
+    }
+    monkeypatch.setenv("OPENAI_PLANNING_MODEL", "gpt-4o-mini")
+    assert planning.planning_model_options() == {"model": "gpt-4o-mini"}

@@ -51,6 +51,16 @@ def tokyo_days():
                     travel=15,
                 ),
                 place("Yoyogi Park", 45, category="nature", area="Harajuku", travel=15),
+                place(
+                    "Omotesando architecture and boutiques",
+                    75,
+                    category="shopping",
+                    area="Omotesando",
+                    travel=20,
+                ),
+                place(
+                    "Nezu Museum collections and garden", 90, 12, "museum", "Aoyama", 15
+                ),
             ],
         ),
         cluster(
@@ -85,6 +95,19 @@ def tokyo_days():
                     area="Shinjuku",
                     travel=10,
                 ),
+                place(
+                    "Kabukicho streets and Godzilla head photo stop",
+                    30,
+                    area="Shinjuku",
+                    travel=10,
+                ),
+                place(
+                    "Shin-Okubo shops and neighborhood streets",
+                    60,
+                    category="shopping",
+                    area="Shin-Okubo",
+                    travel=20,
+                ),
             ],
         ),
         cluster(
@@ -106,6 +129,14 @@ def tokyo_days():
                     travel=15,
                 ),
                 place("teamLab Planets", 120, 35, "culture", "Toyosu", 30),
+                place(
+                    "Tokyo Joypolis indoor attractions",
+                    120,
+                    35,
+                    "adventure",
+                    "Odaiba",
+                    25,
+                ),
             ],
         ),
         cluster(
@@ -136,6 +167,19 @@ def tokyo_days():
                     category="shopping",
                     area="Ikebukuro",
                     travel=10,
+                ),
+                place(
+                    "Animate Ikebukuro and hobby shops",
+                    60,
+                    category="shopping",
+                    area="Ikebukuro",
+                    travel=15,
+                ),
+                place(
+                    "Zoshigaya Kishimojin temple grounds",
+                    45,
+                    area="Zoshigaya",
+                    travel=20,
                 ),
             ],
         ),
@@ -243,59 +287,40 @@ def visit_minutes(item):
     return max(5, min(600, int(item.get("duration_minutes", 60))))
 
 
-def daily_plans(location, nights, pace, arrival, advice=None, notes=""):
+def day_trip_limit(full_days):
+    """Keep short stays focused on the city; allow at most one excursion per four full days."""
+    return min(2, max(0, full_days // 4))
+
+
+def daily_plans(location, nights, pace, arrival, advice=None, notes="", interests=None):
     advice = advice or {}
-    city = location.split(",")[0].strip().casefold()
-    ideas = deepcopy(advice.get("days") or (tokyo_days() if city == "tokyo" else []))
+    ideas = deepcopy(advice.get("days") or [])
     if not ideas and advice.get("activities"):
         # Older in-flight activity histories remain readable; never cycle their attractions.
         ideas = [cluster(advice.get("area", location), advice["activities"])]
-    if not ideas:
-        themes = [
-            "Historic center",
-            "Art and museums",
-            "Parks and gardens",
-            "Architecture and viewpoints",
-            "Local crafts and shopping",
-            "Waterfront or scenic surroundings",
-            "Cultural exhibitions",
-            "Nearby excursion",
-        ]
-        for theme in themes:
-            ideas.append(
-                cluster(
-                    f"{location}: {theme}",
-                    [
-                        place(
-                            f"{theme} — explore {topic} in {location}",
-                            60,
-                            10,
-                            area=location,
-                        )
-                        for topic in [
-                            "main sights",
-                            "local collections",
-                            "public spaces",
-                            "independent venues",
-                            "a viewpoint",
-                            "a second exhibition",
-                            "local streets",
-                        ]
-                    ],
-                )
-            )
-    if city == "tokyo" and not advice.get("days"):
+    if advice.get("reference_plan"):
+        interests = {value.casefold() for value in (interests or [])}
         # Explicit notes can prioritize a full-day experience without piling it onto other sightseeing.
         ideas.sort(
             key=lambda d: (
-                not any(
-                    word in notes.casefold() and word in d["title"].casefold()
-                    for word in ["disney", "hakone", "sunshine"]
+                not (
+                    any(
+                        word in notes.casefold() and word in d["title"].casefold()
+                        for word in ["disney", "hakone", "sunshine"]
+                    )
+                    or (
+                        "theme parks" in interests and "disney" in d["title"].casefold()
+                    )
+                    or (
+                        "day trips" in interests and "day trip" in d["title"].casefold()
+                    )
                 )
             )
         )
     seen = set()
     result = []
+    excursions = 0
+    excursion_limit = day_trip_limit(nights - int(arrival))
     if arrival:
         result.append(
             {
@@ -314,11 +339,16 @@ def daily_plans(location, nights, pace, arrival, advice=None, notes=""):
                 "kind": "arrival",
             }
         )
-    target = {"relaxed": 180, "balanced": 360, "busy": 480}[pace]
+    target = {"relaxed": 180, "balanced": 360, "busy": 600}[pace]
     cap = {"relaxed": 300, "balanced": 540, "busy": 660}[pace]
     for idea in ideas:
         if len(result) >= nights:
             break
+        is_excursion = idea.get("day_trip", False) or bool(
+            re.search(r"day.?trip|excursion", idea.get("title", ""), re.IGNORECASE)
+        )
+        if is_excursion and excursions >= excursion_limit:
+            continue
         activities = []
         elapsed = int(idea.get("travel_minutes", 0))
         maximum = max(cap, 660) if idea.get("full_day") else cap
@@ -339,12 +369,14 @@ def daily_plans(location, nights, pace, arrival, advice=None, notes=""):
             activities.append(item)
             seen.add(name)
             elapsed += duration + travel
-            if elapsed >= target:
+            if elapsed >= target and pace != "busy":
                 break
         if activities:
+            excursions += int(is_excursion)
             result.append(
                 {
                     **idea,
+                    "day_trip": is_excursion,
                     "activities": activities,
                     "kind": "full",
                     "estimated_minutes": elapsed,
@@ -354,19 +386,12 @@ def daily_plans(location, nights, pace, arrival, advice=None, notes=""):
         # No recycled attractions or fictional place names when suggestions run out.
         result.append(
             {
-                "title": "Flexible exploration",
+                "title": "Activity recommendations unavailable",
                 "area": location,
                 "kind": "full",
-                "activities": [
-                    place(
-                        f"Choose an additional local experience in {location} (day {len(result) + 1})",
-                        180,
-                        area=location,
-                        travel=0,
-                    )
-                ],
+                "activities": [],
                 "travel_minutes": 0,
-                "rain": "Choose an indoor exhibition; verify current listings",
+                "rain": None,
                 "unfilled": True,
             }
         )

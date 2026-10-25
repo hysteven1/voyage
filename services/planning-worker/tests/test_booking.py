@@ -266,3 +266,148 @@ def test_provider_failure_logs_no_credentials(plan, options, monkeypatch, caplog
     assert result["budget"] == plan["budget"]
     assert secret not in caplog.text
     assert "api_key=" not in caplog.text
+
+
+def test_long_city_label_resolves_the_google_city_airport_group_and_caches(monkeypatch):
+    provider = booking.SerpApi()
+    calls = []
+
+    def query(**params):
+        calls.append(params)
+        return {
+            "suggestions": [
+                {"type": "city", "name": "Lake Washington", "id": "/m/lake"},
+                {"type": "city", "name": "Washington", "id": "/m/0rh6k"},
+            ]
+        }
+
+    monkeypatch.setattr(provider, "query", query)
+    label = "Washington, District of Columbia, United States"
+    assert provider.city_id(label) == "/m/0rh6k"
+    assert provider.city_id(label) == "/m/0rh6k"
+    assert len(calls) == 1
+    assert calls[0]["q"] == "Washington, United States"
+
+
+def test_city_lookup_retries_short_name_without_choosing_a_single_airport(monkeypatch):
+    provider = booking.SerpApi()
+    calls = []
+
+    def query(**params):
+        calls.append(params["q"])
+        if len(calls) == 1:
+            raise booking.ProviderError("No suggestions")
+        return {
+            "suggestions": [{"type": "city", "name": "Washington", "id": "/m/0rh6k"}]
+        }
+
+    monkeypatch.setattr(provider, "query", query)
+    assert (
+        provider.city_id("Washington, District of Columbia, United States")
+        == "/m/0rh6k"
+    )
+    assert calls == ["Washington, United States", "Washington"]
+
+
+def test_overnight_arrival_uses_booking_window_not_estimated_arrival_date(
+    monkeypatch, options, leg
+):
+    provider = booking.SerpApi()
+    leg.update(
+        departure_date="2026-11-01",
+        arrival_date="2026-11-01",
+        latest_arrival_date="2026-11-06",
+        restrictions={"max_stops": 0, "allow_overnight": True},
+    )
+    monkeypatch.setattr(
+        provider,
+        "query",
+        lambda **_: {
+            "best_flights": [
+                offer("2026-11-01 12:20", "2026-11-02 16:50"),
+                offer("2026-11-01 12:20", "2026-11-07 16:50", price=50),
+            ]
+        },
+    )
+    result = provider.flight(leg, options)
+    assert result["selection_status"] == "selected"
+    assert result["selected_flight"]["arrival_time"] == "2026-11-02 16:50"
+
+
+def test_arrival_rebuilds_stay_and_daily_plans_before_hotel_search(monkeypatch):
+    from app.planning import TripOptions, build_plan
+
+    trip = {
+        "id": "trip",
+        "origin": "Washington, District of Columbia, United States",
+        "destination": "Tokyo, Japan",
+        "start_date": "2026-11-01",
+        "end_date": "2026-11-07",
+        "travelers": 2,
+        "budget": None,
+        "preferences": [],
+        "options": TripOptions(
+            adults=2,
+            route=[{"location": "Tokyo, Japan", "nights": 6, "travel_days": 0}],
+            budget_enforcement="target",
+        ).model_dump(mode="json"),
+    }
+    trip["options"]["route"][0]["mode"] = "flight"
+    plan = build_plan(trip)
+    monkeypatch.setenv("SERPAPI_API_KEY", "test-only")
+
+    def flight(_, leg, options):
+        assert leg["latest_arrival_date"] in ("2026-11-06", "2026-11-07")
+        return {
+            "selection_status": "selected",
+            "selected_flight": {
+                "price": "500",
+                "duration_minutes": 840,
+                "arrival_time": "2026-11-02 16:50"
+                if leg["destination"] == "Tokyo, Japan"
+                else "2026-11-07 15:40",
+            },
+        }
+
+    hotel_dates = []
+
+    def stay(_, stay, options):
+        hotel_dates.append((stay["check_in"], stay["check_out"]))
+        return {
+            "selection_status": "selected",
+            "selected_stay": {"quoted_total": "550"},
+        }
+
+    monkeypatch.setattr(booking.SerpApi, "flight", flight)
+    monkeypatch.setattr(booking.SerpApi, "stay", stay)
+    result = booking.select_travel_options({"trip": trip, "plan": plan})
+    assert hotel_dates == [("2026-11-02", "2026-11-07")]
+    assert result["days"][0]["date"] == "2026-11-01"
+    assert result["days"][0]["kind"] == "transit"
+    assert result["days"][0]["activities"] == []
+    assert result["days"][1]["kind"] == "arrival"
+    assert result["legs"][0]["arrival_date"] == "2026-11-02"
+    assert result["legs"][0]["estimated_hours"] == 14
+    assert result["route"][0]["nights"] == 5
+    assert result["route"][0]["travel_days"] == 1
+    assert result["budget"]["lodging"] == "550.00"
+    assert plan["stays"][0]["check_in"] == "2026-11-01"
+
+
+@pytest.mark.parametrize(
+    ("code", "when", "label"),
+    [
+        ("IAD", "2026-11-22 12:20", "EST"),
+        ("IAD", "2026-07-22 12:20", "EDT"),
+        ("HND", "2026-11-23 16:50", "JST"),
+        ("LHR", "2026-07-22 12:20", "BST"),
+        ("CDG", "2026-11-22 12:20", "CET"),
+    ],
+)
+def test_airport_timezone_uses_airport_and_travel_date(code, when, label):
+    result = booking.airport_timezone_fields(code, when, "departure")
+    assert result["departure_timezone_abbreviation"] == label
+
+
+def test_unknown_airport_does_not_invent_timezone():
+    assert booking.airport_timezone_fields("???", "2026-11-22 12:20", "departure") == {}

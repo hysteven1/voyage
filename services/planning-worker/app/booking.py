@@ -7,21 +7,43 @@ import re
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
-from urllib.parse import quote, urlencode, urlparse
+from functools import lru_cache
+from urllib.parse import parse_qs, quote, urlencode, urlparse
 from urllib.request import urlopen
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+import airportsdata
 from temporalio import activity
 from temporalio.exceptions import ApplicationError
 
-from app.planning import money
+from app.planning import build_plan, money
 
 logger = logging.getLogger("voyage.activities")
 
 
 class ProviderError(Exception):
     pass
+
+
+@lru_cache(maxsize=1)
+def airport_timezones():
+    return {code: data["tz"] for code, data in airportsdata.load("IATA").items()}
+
+
+def airport_timezone_fields(code, local_time, prefix):
+    zone = airport_timezones().get(code)
+    if not zone:
+        return {}
+    try:
+        when = datetime.fromisoformat(local_time).replace(tzinfo=ZoneInfo(zone))
+    except (ValueError, ZoneInfoNotFoundError):
+        return {}
+    return {
+        f"{prefix}_timezone": zone,
+        f"{prefix}_timezone_abbreviation": when.tzname(),
+    }
 
 
 def safe_link(value, google_product=None):
@@ -83,7 +105,8 @@ class SerpApi:
         params.update(api_key=self.key, hl="en", gl="us", currency="USD")
         try:
             with urlopen(
-                "https://serpapi.com/search.json?" + urlencode(params), timeout=25
+                "https://serpapi.com/search.json?" + urlencode(params),
+                timeout=45 if params.get("deep_search") else 25,
             ) as response:
                 result = json.load(response)
         except Exception:  # noqa: BLE001 - provider failures must not leak credential-bearing URLs.
@@ -101,25 +124,56 @@ class SerpApi:
         with self._city_lock:
             if location in self._cities:
                 return self._cities[location]
-            result = self.query(
-                engine="google_flights_autocomplete", q=location, exclude_regions="true"
+            # Our city picker includes state names. Google's autocomplete often
+            # returns no results for that full label (including Washington DC).
+            parts = [p.strip() for p in location.split(",") if p.strip()]
+            if re.fullmatch(r"Washington\s+D\.?C\.?", parts[0], re.IGNORECASE):
+                parts = ["Washington", "United States"]
+            elif (
+                parts[0].casefold() == "washington"
+                and len(parts) == 2
+                and parts[1].replace(".", "").casefold() == "dc"
+            ):
+                parts[1] = "United States"
+            queries = list(
+                dict.fromkeys(
+                    [
+                        ", ".join([parts[0], parts[-1]])
+                        if len(parts) > 2
+                        else location,
+                        parts[0],
+                    ]
+                )
             )
-            city = location.split(",")[0].casefold().replace(" city", "").strip()
-            candidates = [
-                s
-                for s in result.get("suggestions", [])
-                if s.get("type") == "city"
-                and city in s.get("name", "").casefold()
-                and str(s.get("id", "")).startswith(("/m/", "/g/"))
-            ]
+            city = parts[0].casefold().removesuffix(" city")
+            candidates = []
+            for query in queries:
+                try:
+                    result = self.query(
+                        engine="google_flights_autocomplete",
+                        q=query,
+                        exclude_regions="true",
+                    )
+                except ProviderError:
+                    continue
+                candidates = [
+                    s
+                    for s in result.get("suggestions", [])
+                    if s.get("type") == "city"
+                    and city in s.get("name", "").casefold()
+                    and str(s.get("id", "")).startswith(("/m/", "/g/"))
+                ]
+                if candidates:
+                    break
             if not candidates:
                 raise ProviderError("Could not resolve the flight location")
             # Country/state tokens help disambiguate places with the same name.
             words = set(re.findall(r"\w+", location.casefold()))
             chosen = max(
                 candidates,
-                key=lambda s: len(
-                    words & set(re.findall(r"\w+", s["name"].casefold()))
+                key=lambda s: (
+                    s["name"].split(",")[0].casefold().strip() == city,
+                    len(words & set(re.findall(r"\w+", s["name"].casefold()))),
                 ),
             )
             self._cities[location] = chosen["id"]
@@ -137,6 +191,7 @@ class SerpApi:
             "children": sum(age >= 2 for age in options["child_ages"]),
             "infants_in_seat": sum(age < 2 for age in options["child_ages"]),
             "stops": int(prefs.get("max_stops", 1)) + 1,
+            "deep_search": "true",
         }
         if prefs.get("earliest_departure") or prefs.get("latest_arrival"):
             earliest = int((prefs.get("earliest_departure") or "00:00").split(":")[0])
@@ -146,6 +201,8 @@ class SerpApi:
         alternatives = safe_link(
             result.get("search_metadata", {}).get("google_flights_url"), "flights"
         )
+        if alternatives and not parse_qs(urlparse(alternatives).query).get("tfs"):
+            alternatives = None
         candidates = []
         for option in result.get("best_flights", []) + result.get("other_flights", []):
             segments = option.get("flights", [])
@@ -163,9 +220,12 @@ class SerpApi:
                 arrival = datetime.fromisoformat(
                     segments[-1]["arrival_airport"]["time"]
                 )
-                if (
-                    str(departure.date()) != leg["departure_date"]
-                    or str(arrival.date()) != leg["arrival_date"]
+                # Arrival dates in the initial route are estimates. Crossing
+                # time zones must not rule out an otherwise matching flight.
+                # The caller bounds arrival by the next stay/whole trip window.
+                latest = leg.get("latest_arrival_date", leg["arrival_date"])
+                if str(departure.date()) != leg["departure_date"] or not (
+                    departure.date() <= arrival.date() <= date.fromisoformat(latest)
                 ):
                     continue
                 if (
@@ -263,6 +323,16 @@ class SerpApi:
                 "arrival_airport": segments[-1]["arrival_airport"]["id"],
                 "departure_time": segments[0]["departure_airport"]["time"],
                 "arrival_time": segments[-1]["arrival_airport"]["time"],
+                **airport_timezone_fields(
+                    segments[0]["departure_airport"]["id"],
+                    segments[0]["departure_airport"]["time"],
+                    "departure",
+                ),
+                **airport_timezone_fields(
+                    segments[-1]["arrival_airport"]["id"],
+                    segments[-1]["arrival_airport"]["time"],
+                    "arrival",
+                ),
                 "stops": len(segments) - 1,
                 "duration_minutes": selected.get("total_duration"),
                 "price": str(money(selected["price"])),
@@ -444,11 +514,22 @@ def select_travel_options(data):
     if not provider.key:
         plan["booking_source"] = "not_configured"
         return plan
-    tasks = [
-        ("flight", i, leg)
-        for i, leg in enumerate(plan["legs"])
-        if leg["mode"] == "flight"
-    ] + [("stay", i, stay) for i, stay in enumerate(plan["stays"])]
+    # Resolve flights first: real arrival dates determine hotel check-in dates.
+    flight_tasks = []
+    for i, leg in enumerate(plan["legs"]):
+        if leg["mode"] != "flight":
+            continue
+        stay = next(
+            (s for s in plan["stays"] if s["location"] == leg.get("destination")), None
+        )
+        search = {**leg}
+        if stay:
+            search["latest_arrival_date"] = str(
+                date.fromisoformat(stay["check_out"]) - timedelta(days=1)
+            )
+        elif trip.get("end_date"):
+            search["latest_arrival_date"] = trip["end_date"]
+        flight_tasks.append(("flight", i, search))
 
     def select(task):
         kind, index, item = task
@@ -467,20 +548,55 @@ def select_travel_options(data):
             return kind, index, {"selection_status": "unavailable"}
 
     with ThreadPoolExecutor(max_workers=4) as executor:
-        for kind, index, update in executor.map(select, tasks):
-            collection = plan["legs"] if kind == "flight" else plan["stays"]
-            collection[index].update(update)
-            if update.get("selected_flight"):
-                collection[index]["estimated_cost"] = update["selected_flight"]["price"]
-                if update["selected_flight"].get("duration_minutes"):
-                    collection[index]["estimated_hours"] = round(
-                        update["selected_flight"]["duration_minutes"] / 60, 1
+        flights = list(executor.map(select, flight_tasks))
+        adjusted_trip = deepcopy(trip)
+        changed = False
+        for _, index, update in flights:
+            selected = update.get("selected_flight", {})
+            if not selected.get("arrival_time"):
+                continue
+            leg = plan["legs"][index]
+            arrival = datetime.fromisoformat(selected["arrival_time"]).date()
+            for stop, stay in zip(
+                adjusted_trip["options"].get("route", []), plan["stays"], strict=False
+            ):
+                if stay["location"] != leg.get("destination"):
+                    continue
+                if str(arrival) != stay["check_in"]:
+                    stop["travel_days"] = (
+                        arrival - date.fromisoformat(leg["departure_date"])
+                    ).days
+                    stop["nights"] = (
+                        date.fromisoformat(stay["check_out"]) - arrival
+                    ).days
+                    changed = True
+        if changed:
+            # Rebuild with the original AI ideas so budget, easy arrival day,
+            # transit days and all booking dates stay in sync with real flights.
+            plan = build_plan(adjusted_trip, data.get("suggestions"))
+            plan["assumptions"].append(
+                "Hotel check-in and daily plans use the selected flights' local arrival dates."
+            )
+        for _, index, update in flights:
+            leg = plan["legs"][index]
+            leg.update(update)
+            selected = update.get("selected_flight")
+            if selected:
+                leg["estimated_cost"] = selected["price"]
+                if selected.get("duration_minutes"):
+                    leg["estimated_hours"] = round(selected["duration_minutes"] / 60, 1)
+                if selected.get("arrival_time"):
+                    leg["arrival_date"] = str(
+                        datetime.fromisoformat(selected["arrival_time"]).date()
                     )
+        stays = [("stay", i, stay) for i, stay in enumerate(plan["stays"])]
+        for _, index, update in executor.map(select, stays):
+            plan["stays"][index].update(update)
             if update.get("selected_stay") and (
                 trip["options"]["rooms"] == 1
                 or trip["options"]["lodging"] == "apartment"
             ):
-                collection[index]["estimated_cost"] = update["selected_stay"][
+                plan["stays"][index]["estimated_cost"] = update["selected_stay"][
                     "quoted_total"
                 ]
     if any(leg.get("selected_flight") for leg in plan["legs"]) or any(
@@ -489,6 +605,6 @@ def select_travel_options(data):
         refresh_estimates(plan)
     plan["booking_source"] = "serpapi"
     plan["assumptions"].append(
-        "Selected travel options were retrieved from SerpApi. Prices and availability can change; group, room and luggage fees must be confirmed on the booking page."
+        "Travel searches use city airport groups unless an airport code is entered. Selected travel quotes can change; confirm group, room and luggage fees on the booking page."
     )
     return plan

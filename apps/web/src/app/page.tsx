@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, ReactNode, useRef, useState } from "react";
+import { FormEvent, ReactNode, useEffect, useRef, useState } from "react";
 import dayjs from "dayjs";
 import Link from "next/link";
 import {
@@ -39,6 +39,8 @@ import SpaRounded from "@mui/icons-material/SpaRounded";
 import ParkRounded from "@mui/icons-material/ParkRounded";
 import MuseumRounded from "@mui/icons-material/MuseumRounded";
 import HikingRounded from "@mui/icons-material/HikingRounded";
+import AttractionsRounded from "@mui/icons-material/AttractionsRounded";
+import ShoppingBagRounded from "@mui/icons-material/ShoppingBagRounded";
 import TripItinerary from "@/components/TripItinerary";
 import TravelScene from "@/components/TravelScene";
 import TravelDates from "@/components/form/TravelDates";
@@ -54,9 +56,13 @@ import {
 } from "@/lib/trip";
 
 const interests = [
-  { name: "Nature", icon: <ParkRounded /> },
-  { name: "Culture", icon: <MuseumRounded /> },
-  { name: "Adventure", icon: <HikingRounded /> },
+  { name: "Iconic sights", icon: <LocationOnRounded /> },
+  { name: "Culture & history", icon: <MuseumRounded /> },
+  { name: "Nature & scenery", icon: <ParkRounded /> },
+  { name: "Adventure & hiking", icon: <HikingRounded /> },
+  { name: "Shopping", icon: <ShoppingBagRounded /> },
+  { name: "Theme parks", icon: <AttractionsRounded /> },
+  { name: "Day trips", icon: <ExploreRounded /> },
 ];
 const initial: TripForm = {
   origin: "",
@@ -97,6 +103,16 @@ type Proposal = {
 };
 
 export default function Home() {
+  useEffect(() => {
+    if (["#how-it-works", "#planner"].includes(window.location.hash)) {
+      window.history.replaceState(
+        window.history.state,
+        "",
+        window.location.pathname + window.location.search,
+      );
+      window.scrollTo(0, 0);
+    }
+  }, []);
   const [form, setForm] = useState(initial);
   const [step, setStep] = useState(0);
   const [tripId, setTripId] = useState<string | null>(null);
@@ -644,8 +660,8 @@ export default function Home() {
                         </div>
                       </FormSection>
                       <FormSection
-                        title="What draws you in? (optional)"
-                        subtitle="Pick what you enjoy, or leave it open."
+                        title="What would you love to explore? (optional)"
+                        subtitle="Choose your interests, or leave it open for a mix of must-see highlights."
                       >
                         <Stack
                           direction="row"
@@ -781,27 +797,38 @@ export default function Home() {
             ) : (
               <>
                 <Paper className="saved-card">
-                  <Chip
-                    icon={<CheckRounded />}
-                    color="primary"
-                    label="Your route is ready"
-                  />
-                  <Typography variant="h4" sx={{ mt: 2, fontWeight: 600 }}>
-                    The good part starts here.
-                  </Typography>
-                  <Typography color="text.secondary" sx={{ my: 2 }}>
-                    Your details are saved. We’re creating your day-by-day
-                    itinerary, with ideas for what to do and where to stay.
-                  </Typography>
-                  <Button
-                    variant="outlined"
-                    onClick={() => {
-                      setTripId(null);
-                      navigate(0);
-                    }}
+                  <Typography
+                    component="h2"
+                    variant="h4"
+                    sx={{ fontWeight: 600 }}
                   >
-                    Change details & start a new plan
-                  </Button>
+                    Your itinerary
+                  </Typography>
+                  <Typography color="text.secondary" sx={{ mt: 1, mb: 2.5 }}>
+                    Your travel, stays, and days ahead, all in one place.
+                  </Typography>
+                  <Stack direction="row" sx={{ gap: 1, flexWrap: "wrap" }}>
+                    <Button
+                      variant="outlined"
+                      startIcon={<ArrowBackRounded />}
+                      onClick={() => {
+                        setTripId(null);
+                        navigate(0);
+                      }}
+                    >
+                      Edit trip details
+                    </Button>
+                    <Button
+                      startIcon={<AddRounded />}
+                      onClick={() => {
+                        setTripId(null);
+                        setForm(initial);
+                        navigate(0);
+                      }}
+                    >
+                      Plan another trip
+                    </Button>
+                  </Stack>
                 </Paper>
                 <TripItinerary key={tripId} tripId={tripId} autoStart />
               </>

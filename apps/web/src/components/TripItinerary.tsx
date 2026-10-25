@@ -175,7 +175,7 @@ export default function TripItinerary({
             <AutoAwesomeRounded color="primary" />
           )}
           <Typography variant="h6" component="h3">
-            {loading ? "A little planning magic…" : "Ready when you are."}
+            {loading ? "Building your itinerary" : "Ready to plan"}
           </Typography>
         </Stack>
         <Typography variant="body2" color="text.secondary">

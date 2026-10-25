@@ -36,18 +36,25 @@ existing saved itineraries retain their original renderer and planning behavior.
 
 ### Data and estimates
 
-Both the API and worker optionally use `OPENAI_API_KEY` and `OPENAI_MODEL` (already
-wired through Compose). The API uses structured route suggestions; the worker
+Both the API and worker optionally use `OPENAI_API_KEY`. `OPENAI_PLANNING_MODEL`
+defaults to `gpt-6.1-sol` for route and itinerary reasoning; `OPENAI_MODEL` remains
+`gpt-4o-mini` by default for short narrative copy. Both are wired through Compose. The API uses structured route suggestions; the worker
 suggests varied daily clusters across each city, with visit and transfer durations,
-and optional full-day excursions. With no key or an unavailable model, offline route
-suggestions and destination templates are used. Tokyo has a reference itinerary
-covering different districts, Sunshine City, Hakone and a choice of Disney parks;
-other destinations use general outlines. Photo stops such as Hachiko get minutes,
+and optional full-day excursions. Each destination is generated independently, with
+its own dates and request timeout; one unavailable city does not discard the others.
+With no key or an unavailable model, route estimates remain available but activity
+days are explicitly incomplete. Repetitive generic activities are never substituted
+for actual recommendations. Photo stops such as Hachiko get minutes,
 while theme parks and distant excursions occupy their own days. Restaurants and
 food interests are excluded; meal allowances remain in the cost estimate. Offline country-to-city and route geography coverage
 is deliberately limited; unknown routes retain the entered order and require review.
 AI suggestions are not a verified map, timetable, review feed, or availability feed.
-Notes are advisory; conflicts surfaced by AI require correction. Traveler review
+Interests are optional guidance and can be omitted when they do not fit. The route
+request excludes activity interests. A blocking AI conflict must concern dates,
+transport, required stops or budget and quote an explicit requirement present in
+the notes; free-form preference mismatches cannot block planning. Quoted notes
+ground the source of a conflict, not factual proof of the model's interpretation.
+Date, traveler, route and budget rules are still validated in code. Traveler review
 and booking-site confirmation remain necessary, especially without AI configured.
 
 Costs are illustrative USD estimates, including children. Travelers choose a
@@ -187,10 +194,17 @@ Recreate the worker after changing its environment:
 docker compose up -d --build worker web
 ```
 
-The worker searches SerpApi's Google Flights engine for each flight leg, checks local
-flight times, dates, connections and overnight preferences, and retrieves a link
+The worker resolves city labels to Google Flights airport groups, rather than requiring
+a specific airport. It retries shorter city/country labels when full administrative
+labels are not recognized. Each flight leg uses deep search, local times, connections
+and overnight preferences, and retrieves a link
 pinned to the selected flight numbers. It keeps a separate filtered alternatives
-link. Stays use Google Hotels searches with dates, guest counts and a 4+ guest rating
+link. Flights are resolved before hotels: actual arrival dates update transit days,
+the easy arrival day, stay nights and check-in dates while keeping the trip window fixed.
+A failed search is displayed separately from a search returning no matching offers.
+Bare Google Flights landing URLs are discarded; fallback searches use Google Search
+because the Flights landing page ignores free-text query parameters.
+Stays use Google Hotels searches with dates, guest counts and a 4+ guest rating
 filter, then select a named property with at least 30 reviews. Property details
 supply booking links and rates; separate Google Hotels and dated Airbnb links offer
 alternatives. Vacation rentals also require a reported capacity sufficient for the
@@ -214,9 +228,76 @@ The added selection activity has a Temporal patch marker for existing histories.
 Earlier itinerary schema changes still require checking for active workflows before
 replacing the worker.
 
-The Tokyo reference uses planning duration estimates, not verified opening times or
+Tokyo reference data is used explicitly by regression fixtures, not automatically
+as a replacement for failed AI suggestions. Its estimates are not opening times or
 reservations. Official references include [Tokyo Disney Resort](https://www.tokyodisneyresort.jp/en/),
 [Sunshine Aquarium](https://sunshinecity.jp/en/aquarium/),
 [Sunshine 60 Observatory](https://sunshinecity.jp/en/observatory/),
 [Shinjuku Gyoen](https://fng.or.jp/shinjuku/en/) and
 [Hakone Open-Air Museum](https://www.hakone-oam.or.jp/en/).
+
+
+### Itinerary coverage and interests
+
+The AI planner builds a must-see shortlist and day routes for every destination,
+using the travel month, stay length, pace and interests. Highlights include reasons
+to visit, and scheduled sights can carry a Must-see tag. It requests an explicit
+number of daily plans and makes one bounded repair request when days are missing
+or packed days are too sparse. If removing an extra excursion leaves a gap, a short
+supplemental request asks only for the missing city days, excluding existing attractions. These checks apply to all cities. Missing recommendations remain empty and
+are marked incomplete; reference examples are only used explicitly by tests.
+
+Packed pace uses all fitting nearby suggestions, up to 11 hours including travel,
+with an AI target of 9–10 hours. Actual visit lengths are preserved, including brief
+photo stops. Full-day parks and excursions need no extra city stops. Meal breaks
+remain flexible. Suggestions are editorial estimates, not live opening hours or
+verified seasonal event listings.
+
+Short stays prioritize city highlights. Day trips are allowed only with at least
+four full sightseeing days at that destination, with at most one scheduled excursion
+per four full days (maximum two). Arrival and transit days are excluded. Day-trip
+alternatives are omitted for short stays, including after flight arrival dates reduce
+the available time. A long trip split among short city stays does not automatically
+qualify for excursions.
+
+Optional interests now cover Iconic sights, Culture & history, Nature & scenery,
+Adventure & hiking, Shopping, Theme parks and Day trips. Blank interests produce a
+mix of city highlights. Old `#how-it-works` and `#planner` URLs are normalized to `/`
+without changing the query parameters or adding an extra browser history entry.
+
+
+### Current-session itinerary UI
+
+Selected flights show the airline, flight number, local departure/arrival times,
+quote and stops. Duplicate route-duration estimates and search instructions remain
+only for unselected options. Airport timezones come from the `airportsdata` IATA
+catalog and Python `zoneinfo`/`tzdata`, using the actual travel date for daylight
+saving rules; unknown airports are labeled local time rather than guessing a zone.
+Selected stays show the property, reviews, quote and one confirmation note, with
+estimated allowances retained only when no property recommendation is available.
+
+The itinerary header offers **Edit trip details** (reuse current form values) and
+**Plan another trip** (clear the form). No account, saved-trip browser, recovery link,
+or browser storage is added. Refreshing starts a blank page. Trips and itinerary
+JSON remain in PostgreSQL for future account/history features; the active page
+uses its in-memory trip ID to display the generated itinerary.
+
+The stronger planning model was checked against the configured API account and a
+short Tokyo trip with Adventure & hiking. This is a paid OpenAI API call, separate
+from a ChatGPT/Codex subscription. See the official
+[GPT-6.1 Sol model documentation](https://developers.openai.com/api/docs/models/gpt-6.1-sol).
+Use `OPENAI_PLANNING_MODEL` to choose another compatible model. Reasoning options
+are sent to GPT-5/GPT-6 models; a `gpt-4o-mini` override omits them. Itinerary requests
+use medium reasoning, while the shorter route proposal uses low reasoning.
+
+
+### Multi-city failure handling
+
+A three-city trip previously used one large AI response: a timeout discarded every
+city and triggered repetitive generic templates. Cities now run separately with up
+to four concurrent requests. Valid cities are retained; failed destinations are
+listed in `incomplete_destinations`. Their activity lists contain no invented visits,
+prices or durations. The UI warns that the itinerary and activity costs are incomplete
+and labels the budget a partial estimate. Users can edit their details to generate a
+new plan; existing completed itineraries are preserved. Route titles are joined from
+structured locations with ` → ` instead of trusting AI-generated separators.

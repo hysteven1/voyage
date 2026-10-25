@@ -48,7 +48,12 @@ async function selectLocation(
   await expect(input).toHaveValue(suggestion);
 }
 
-async function mockPlanner(page: Page, withOffers = false) {
+async function mockPlanner(
+  page: Page,
+  withOffers = false,
+  searchUnavailable = false,
+  partial = false,
+) {
   const captured: {
     proposal?: TripForm;
     created?: TripForm;
@@ -91,10 +96,18 @@ async function mockPlanner(page: Page, withOffers = false) {
         version: 2,
         trip_id: "test-trip",
         currency: "USD",
+        route: partial
+          ? ["Tokyo, Japan", "Kyoto, Japan", "Osaka, Japan"].map(
+              (location) => ({ location }),
+            )
+          : undefined,
+        incomplete_destinations: partial ? ["Kyoto, Japan"] : [],
         data_source: "planning_estimates",
         suggestion_source: "offline_templates",
         narrative: {
-          title: "A week in Tokyo",
+          title: partial
+            ? "Tokyo, Japan D Kyoto, Japan D Osaka, Japan"
+            : "A week in Tokyo",
           summary: "A little exploration, a little breathing room.",
           days: [],
         },
@@ -113,6 +126,26 @@ async function mockPlanner(page: Page, withOffers = false) {
           per_person_total: "787.75",
           spending_style: "value",
         },
+        destination_highlights: withOffers
+          ? [
+              {
+                location: "Tokyo, Japan",
+                highlights: [
+                  {
+                    name: "Shibuya Sky",
+                    reason: "A broad view of the city skyline.",
+                  },
+                ],
+                day_trips: [
+                  {
+                    name: "Hakone",
+                    reason: "Mountains and lakes beyond Tokyo.",
+                    travel_minutes: 210,
+                  },
+                ],
+              },
+            ]
+          : [],
         destination_estimates: [
           {
             location: "Tokyo, Japan",
@@ -141,19 +174,28 @@ async function mockPlanner(page: Page, withOffers = false) {
                   earliest_departure: null,
                   latest_arrival: null,
                 },
-                selected_flight: {
-                  airlines: ["Example Air"],
-                  flight_numbers: ["EA 123"],
-                  departure_airport: "LHR",
-                  arrival_airport: "HND",
-                  departure_time: "2026-11-02 18:00",
-                  arrival_time: "2026-11-03 17:00",
-                  stops: 0,
-                  price: "1200",
-                  google_flights_url:
-                    "https://www.google.com/travel/flights?tfs=selected",
-                  checked_at: "2026-11-01T14:00:00Z",
-                },
+                selection_status: searchUnavailable
+                  ? "unavailable"
+                  : "selected",
+                selected_flight: searchUnavailable
+                  ? undefined
+                  : {
+                      airlines: ["Example Air"],
+                      flight_numbers: ["EA 123"],
+                      departure_airport: "LHR",
+                      arrival_airport: "HND",
+                      departure_time: "2026-11-02 18:00",
+                      arrival_time: "2026-11-03 17:00",
+                      departure_timezone: "Europe/London",
+                      arrival_timezone: "Asia/Tokyo",
+                      departure_timezone_abbreviation: "GMT",
+                      arrival_timezone_abbreviation: "JST",
+                      stops: 0,
+                      price: "1200",
+                      google_flights_url:
+                        "https://www.google.com/travel/flights?tfs=selected",
+                      checked_at: "2026-11-01T14:00:00Z",
+                    },
               },
             ]
           : [],
@@ -204,12 +246,31 @@ async function mockPlanner(page: Page, withOffers = false) {
                 area: "Central neighborhood",
                 price_per_person: "0",
                 duration_hours: 1,
-                ...(withOffers ? { duration_minutes: 5 } : {}),
+                ...(withOffers
+                  ? {
+                      duration_minutes: 5,
+                      must_see: true,
+                      reason: "A brief stop at a beloved Tokyo landmark.",
+                    }
+                  : {}),
                 search_url: "https://www.google.com/search?q=Tokyo+walks",
               },
             ],
             rain_alternative: null,
           },
+          ...(partial
+            ? [
+                {
+                  date: "2026-11-03",
+                  location: "Kyoto, Japan",
+                  title: "Activity recommendations unavailable",
+                  kind: "full",
+                  needs_personalization: true,
+                  activities: [],
+                  rain_alternative: null,
+                },
+              ]
+            : []),
         ],
         assumptions: [],
         notes: "",
@@ -332,7 +393,9 @@ test("already-there hides origin, offers an optional budget, and generates in tw
   await chooseDates(page);
   await page.getByRole("button", { name: "Make it personal" }).click();
   await expect(
-    page.getByRole("heading", { name: "What draws you in? (optional)" }),
+    page.getByRole("heading", {
+      name: "What would you love to explore? (optional)",
+    }),
   ).toBeVisible();
   await expect(
     page.getByRole("button", { name: "Relaxation", exact: true }),
@@ -576,7 +639,9 @@ test("selected travel options follow the budget with specific and alternative li
     .fill("Tokyo, Japan");
   await chooseDates(page);
   await page.getByRole("button", { name: "Make it personal" }).click();
-  await mockPlanner(page, true);
+  await page.getByRole("button", { name: "Theme parks", exact: true }).click();
+  await page.getByRole("button", { name: "Day trips", exact: true }).click();
+  const captured = await mockPlanner(page, true);
   await page.getByRole("button", { name: "Plan my trip" }).click();
   const budget = page.getByText("Estimated total · USD", { exact: true });
   const flights = page.getByRole("heading", {
@@ -589,6 +654,33 @@ test("selected travel options follow the budget with specific and alternative li
     name: "Your days, with room to wander.",
   });
   await expect(days).toBeVisible();
+  await expect(
+    page.getByText("LHR Nov 2, 18:00 GMT → HND Nov 3, 17:00 JST", {
+      exact: true,
+    }),
+  ).toBeVisible();
+  await expect(page.getByText(/Confirm in search:/)).toHaveCount(0);
+  await expect(page.getByText(/estimated for the group/)).toHaveCount(0);
+  await expect(page.getByText(/estimated stay total/)).toHaveCount(0);
+  await expect(
+    page.getByText("Check reviews and transit access.", { exact: true }),
+  ).toHaveCount(0);
+  expect(captured.created?.preferences).toEqual(["Theme parks", "Day trips"]);
+  await expect(
+    page.getByRole("heading", { name: "Highlights in Tokyo, Japan" }),
+  ).toBeVisible();
+  await expect(
+    page.getByText("A broad view of the city skyline."),
+  ).toBeVisible();
+  await page
+    .getByRole("button", { name: "Day trips worth considering" })
+    .click();
+  await expect(
+    page.getByText("Mountains and lakes beyond Tokyo."),
+  ).toBeVisible();
+  await expect(
+    page.getByText("About 3h 30 min round-trip travel", { exact: true }),
+  ).toBeVisible();
   for (const [before, after] of [
     [budget, flights],
     [flights, stays],
@@ -641,4 +733,130 @@ test("selected travel options follow the budget with specific and alternative li
       () => document.documentElement.scrollWidth <= innerWidth,
     ),
   ).toBeTruthy();
+});
+
+test("old section fragments return to the clean home URL", async ({ page }) => {
+  await page.goto("/#how-it-works");
+  await expect(page).toHaveURL(/\/$/);
+  await expect(
+    page.getByRole("combobox", { name: "From", exact: true }),
+  ).toBeVisible();
+});
+
+test("a failed live search is distinguished from no matching flights", async ({
+  page,
+}) => {
+  await page
+    .getByRole("combobox", { name: "From", exact: true })
+    .fill("Washington, District of Columbia, United States");
+  await page
+    .getByRole("combobox", { name: "Where to?", exact: true })
+    .fill("Tokyo, Japan");
+  await chooseDates(page);
+  await page.getByRole("button", { name: "Make it personal" }).click();
+  await mockPlanner(page, true, true);
+  await page.getByRole("button", { name: "Plan my trip" }).click();
+  await expect(
+    page.getByText(/The live flight search was unavailable/),
+  ).toBeVisible();
+  await expect(
+    page.getByText(/no options matching these preferences/),
+  ).toHaveCount(0);
+});
+
+test("itinerary actions distinguish editing current details from starting fresh", async ({
+  page,
+}) => {
+  await page
+    .getByRole("combobox", { name: "From", exact: true })
+    .fill("London, UK");
+  await page
+    .getByRole("combobox", { name: "Where to?", exact: true })
+    .fill("Tokyo, Japan");
+  await chooseDates(page);
+  await page.getByRole("button", { name: "Make it personal" }).click();
+  await mockPlanner(page);
+  await page.getByRole("button", { name: "Plan my trip" }).click();
+  await expect(
+    page.getByRole("heading", { name: "A week in Tokyo" }),
+  ).toBeVisible();
+  await expect(page.getByText(/Your details are saved/)).toHaveCount(0);
+  await page.getByRole("button", { name: "Edit trip details" }).click();
+  await expect(
+    page.getByRole("combobox", { name: "From", exact: true }),
+  ).toHaveValue("London, UK");
+  await expect(
+    page.getByRole("combobox", { name: "Where to?", exact: true }),
+  ).toHaveValue("Tokyo, Japan");
+  await page.getByRole("button", { name: "Make it personal" }).click();
+  await page.getByRole("button", { name: "Plan my trip" }).click();
+  await expect(
+    page.getByRole("heading", { name: "A week in Tokyo" }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Plan another trip" }).click();
+  await expect(
+    page.getByRole("combobox", { name: "From", exact: true }),
+  ).toHaveValue("");
+  await expect(
+    page.getByRole("combobox", { name: "Where to?", exact: true }),
+  ).toHaveValue("");
+});
+
+test("refresh starts a new session without reopening previous trips", async ({
+  page,
+}) => {
+  await page.getByRole("button", { name: /Already there/ }).click();
+  await page
+    .getByRole("combobox", { name: "Where", exact: true })
+    .fill("Tokyo, Japan");
+  await chooseDates(page);
+  await page.getByRole("button", { name: "Make it personal" }).click();
+  const captured = await mockPlanner(page);
+  await page.getByRole("button", { name: "Plan my trip" }).click();
+  await expect(
+    page.getByRole("heading", { name: "A week in Tokyo" }),
+  ).toBeVisible();
+  await page.reload();
+  await expect(
+    page.getByRole("combobox", { name: "From", exact: true }),
+  ).toHaveValue("");
+  await expect(
+    page.getByRole("heading", { name: "A week in Tokyo" }),
+  ).toHaveCount(0);
+  expect(captured.starts).toBe(1);
+});
+
+test("partial city suggestions show an honest warning and a clean structured route title", async ({
+  page,
+}) => {
+  await page.getByRole("button", { name: /Already there/ }).click();
+  await page
+    .getByRole("combobox", { name: "Where", exact: true })
+    .fill("Tokyo, Japan");
+  await chooseDates(page);
+  await page.getByRole("button", { name: "Make it personal" }).click();
+  await mockPlanner(page, false, false, true);
+  await page.getByRole("button", { name: "Plan my trip" }).click();
+  await expect(
+    page.getByRole("heading", {
+      name: "Tokyo, Japan → Kyoto, Japan → Osaka, Japan",
+      exact: true,
+    }),
+  ).toBeVisible();
+  await expect(
+    page.getByText("Tokyo, Japan D Kyoto, Japan D Osaka, Japan", {
+      exact: true,
+    }),
+  ).toHaveCount(0);
+  await expect(
+    page.getByRole("region", { name: "Your itinerary" }).getByRole("alert"),
+  ).toContainText(
+    "Activity recommendations could not be completed for Kyoto, Japan",
+  );
+  await expect(
+    page.getByText("Partial trip estimate · USD", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByText(/No placeholder activities or visit costs have been added/),
+  ).toBeVisible();
 });

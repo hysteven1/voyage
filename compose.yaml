@@ -72,6 +72,7 @@ services:
       SERVICE_NAME: trip-service
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}
+      OPENAI_PLANNING_MODEL: ${OPENAI_PLANNING_MODEL:-gpt-6.1-sol}
       DATABASE_URL: postgresql+psycopg://voyage:${POSTGRES_PASSWORD:-voyage_local_dev}@postgres:5432/voyage
       TEMPORAL_ADDRESS: temporal:7233
     ports:
@@ -103,6 +104,7 @@ services:
       TEMPORAL_ADDRESS: temporal:7233
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}
+      OPENAI_PLANNING_MODEL: ${OPENAI_PLANNING_MODEL:-gpt-6.1-sol}
     depends_on:
       migrate:
         condition: service_completed_successfully

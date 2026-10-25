@@ -1,0 +1,14 @@
+# Local kind GitOps promotion: image content built from this full source revision.
+# These images must be built/tagged/loaded before synchronizing the Application.
+# Registry-based promotion uses the GHCR repositories and published SHA/digests.
+images:
+  api:
+    repository: voyage-api
+    tag: sha-359cb903d3261160e976b5cc34f9e01cb3f61e1a
+  worker:
+    repository: voyage-worker
+    tag: sha-359cb903d3261160e976b5cc34f9e01cb3f61e1a
+  web:
+    repository: voyage-web
+    tag: sha-359cb903d3261160e976b5cc34f9e01cb3f61e1a
+imagePullPolicy: Never

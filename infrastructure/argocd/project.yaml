@@ -1,0 +1,21 @@
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: voyage
+  namespace: argocd
+spec:
+  description: Voyage local development only; dependencies and Secrets are provisioned separately
+  sourceRepos:
+    - https://github.com/hysteven1/Voyage.git
+  destinations:
+    - namespace: voyage-dev
+      server: https://kubernetes.default.svc
+  clusterResourceWhitelist: []
+  namespaceResourceWhitelist:
+    - {group: '', kind: ConfigMap}
+    - {group: '', kind: Service}
+    - {group: '', kind: ServiceAccount}
+    - {group: apps, kind: Deployment}
+    - {group: batch, kind: Job}
+    - {group: networking.k8s.io, kind: Ingress}
+    - {group: networking.k8s.io, kind: NetworkPolicy}

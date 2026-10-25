@@ -1,0 +1,31 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: voyage
+  namespace: argocd
+  # No cascading-delete finalizer: deleting this declaration must not wipe resources.
+spec:
+  project: voyage
+  source:
+    repoURL: https://github.com/hysteven1/Voyage.git
+    targetRevision: main
+    path: infrastructure/helm/voyage
+    helm:
+      releaseName: voyage
+      valueFiles:
+        - values-development.yaml
+        - ../../environments/development.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: voyage-dev
+  syncPolicy:
+    # Manual by default. No production destination or cluster-wide privileges.
+    syncOptions:
+      - CreateNamespace=false
+      - FailOnSharedResource=true
+    retry:
+      limit: 2
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 1m

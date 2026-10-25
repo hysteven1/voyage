@@ -18,6 +18,8 @@ helm template voyage "$chart" -n voyage-prod -f "$chart/values-production.yaml" 
   --set images.web.tag=sha-0000000000000000000000000000000000000000 \
   --set config.temporalAddress=temporal.example.invalid:7233 --set config.temporalNamespace=example \
   --set ingress.enabled=true --set networkPolicy.enabled=true > "$rendered/production.yaml"
+helm template voyage "$chart" -n voyage-dev -f "$chart/values-development.yaml" \
+  -f infrastructure/environments/development.yaml > "$rendered/gitops.yaml"
 kubeconform -strict -summary -kubernetes-version 1.34.0 "$rendered" infrastructure/local/dependencies.yaml
 # Missing image revisions must be rejected rather than silently using latest.
 if helm template invalid "$chart" > /dev/null 2>&1; then

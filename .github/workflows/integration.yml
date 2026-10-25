@@ -17,6 +17,7 @@ jobs:
       - run: scripts/install-infra-tools.sh "$RUNNER_TEMP/voyage-tools"
       - run: echo "$RUNNER_TEMP/voyage-tools" >> "$GITHUB_PATH"
       - run: scripts/kind-smoke.sh
+      - run: scripts/validate-argocd.sh
       - name: Inspect failed local deployment
         if: failure()
         run: |

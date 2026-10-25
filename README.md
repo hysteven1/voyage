@@ -161,11 +161,16 @@ budget. Already-there trips hide the origin input and use “Where”. Filled lo
 do not repeat search guidance. Date selection highlights both endpoints and every
 day in between, including when the selection is reopened across months.
 
-Flight preferences are collected once on the first step and applied to all flight
-searches. The separate “Make it yours” route screen has been removed. Interests
+Flight preferences are collected once on the first step. The departure-after
+window applies only when leaving home; the get-home-by window applies only to the
+return flight, in the home airport's local time. Overnight flights
+are allowed, without a separate toggle. The separate “Make it yours” route screen has been removed. Interests
 are optional; relaxation is represented by the pace choice rather than an interest.
-The internal lodging value `apartment` is retained for API compatibility and shown
-as “Vacation rentals”.
+The lodging dropdown and car-rental controls are removed. New plans recommend
+hotels and always offer an entire-home Airbnb search for the full group. Legacy
+lodging/car options remain readable through the API. Child ages are optional,
+with explanatory copy about possible age-dependent fares. If all ages are not
+provided, flight quotes use a labeled adult-fare estimate for the whole group.
 
 Optional budget amounts require the new nullable-budget migration. To update Docker:
 
@@ -204,11 +209,14 @@ the easy arrival day, stay nights and check-in dates while keeping the trip wind
 A failed search is displayed separately from a search returning no matching offers.
 Bare Google Flights landing URLs are discarded; fallback searches use Google Search
 because the Flights landing page ignores free-text query parameters.
-Stays use Google Hotels searches with dates, guest counts and a 4+ guest rating
-filter, then select a named property with at least 30 reviews. Property details
+Stays use Google Hotels searches with dates, one representative room for up to
+four guests and a 4+ guest rating filter, then select a named property with at
+least 30 reviews. A room quote is multiplied by the requested room count for the
+group estimate; availability of that many rooms is not assumed to be verified.
+Group and per-person estimates are displayed. Property details
 supply booking links and rates; separate Google Hotels and dated Airbnb links offer
-alternatives. Vacation rentals also require a reported capacity sufficient for the
-party. This is a Google Hotels/vacation rental integration, not a direct Airbnb feed.
+alternatives. Airbnb links are generated before provider requests and remain
+available even when no live hotel quote is retrieved. This is not a direct Airbnb feed.
 See the [Google Flights API](https://serpapi.com/google-flights-api) and
 [Google Hotels API](https://serpapi.com/google-hotels-api) documentation.
 
@@ -318,3 +326,16 @@ Google Hotels directly with location, stay dates, guest ages, accommodation type
 and the 4+ rating filter encoded in its `ts` search state. This format follows
 [SerpApi's Google Hotels search-state analysis](https://serpapi.com/blog/decoding-protobuf-messages-without-schema/).
 Room counts and final capacity still need confirmation with the selected property.
+
+Origin autocomplete supports airport names/IATA codes as well as cities, with
+aliases for Washington DC/D.C. Destination inputs remain city/country searches
+so daily itineraries target a place to explore. Airport suggestions use the
+MIT-licensed airportsdata 20260905 extract; its license is in `apps/web/src/data`.
+
+Flight alternatives use Google Flights' encoded route/date/stops state. For
+parties above nine travelers, searches show one adult for route exploration and
+do not attach a smaller-party quote to the whole group. The UI explains that
+the full party needs an airline/group quote. Airbnb searches use `/s/homes` with
+an explicit location query, dates, guest count and entire-home filter.
+Edit/new-trip actions stay disabled until planning completes or fails; editing
+does not cancel a running Temporal workflow.

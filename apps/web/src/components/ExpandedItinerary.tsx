@@ -55,6 +55,8 @@ export type ExpandedPlan = {
     restrictions: FlightPreferences | null;
     alternatives_url?: string;
     selection_status?: string;
+    search_note?: string;
+    search_travelers?: number;
     selected_flight?: {
       airlines: string[];
       flight_numbers: string[];
@@ -511,24 +513,35 @@ export default function ExpandedItinerary({ plan }: { plan: ExpandedPlan }) {
                     </Typography>
                   </Box>
                 )}
-                {leg.mode === "flight" && !leg.selected_flight && (
+                {leg.mode === "flight" && leg.search_note && (
                   <Typography
-                    variant="caption"
+                    variant="body2"
                     color="text.secondary"
-                    sx={{ display: "block", mb: 1 }}
+                    sx={{ mb: 1 }}
                   >
-                    {leg.selection_status === "no_matching_offer"
-                      ? "The flight search returned no options matching these preferences."
-                      : leg.selection_status === "unavailable"
-                        ? "The live flight search was unavailable. Flights may still be available; the cost shown is an estimate."
-                        : plan.booking_source === "not_configured"
-                          ? "Live flight search is not configured. The cost shown is an estimate."
-                          : "No live flight quote is attached to this saved plan. Search options below."}
+                    {leg.search_note}
                   </Typography>
                 )}
+                {leg.mode === "flight" &&
+                  !leg.selected_flight &&
+                  !leg.search_note && (
+                    <Typography
+                      variant="caption"
+                      color="text.secondary"
+                      sx={{ display: "block", mb: 1 }}
+                    >
+                      {leg.selection_status === "no_matching_offer"
+                        ? "The flight search returned no options matching these preferences."
+                        : leg.selection_status === "unavailable"
+                          ? "The live flight search was unavailable. Flights may still be available; the cost shown is an estimate."
+                          : plan.booking_source === "not_configured"
+                            ? "Live flight search is not configured. The cost shown is an estimate."
+                            : "No live flight quote is attached to this saved plan. Search options below."}
+                    </Typography>
+                  )}
                 <Search href={leg.alternatives_url ?? leg.search_url}>
                   {leg.mode === "flight"
-                    ? `Other flights on ${dayjs(leg.departure_date).format("MMM D")} · ${leg.restrictions?.max_stops === 0 ? "nonstop" : `up to ${leg.restrictions?.max_stops ?? 1} stop(s)`}`
+                    ? `Other flights on ${dayjs(leg.departure_date).format("MMM D")} · ${leg.restrictions?.max_stops === 0 ? "nonstop" : `up to ${leg.restrictions?.max_stops ?? 1} stop(s)`}${leg.search_travelers === 1 ? " · 1 adult" : ""}`
                     : "Compare transport options"}
                 </Search>
               </Paper>
@@ -644,10 +657,7 @@ export default function ExpandedItinerary({ plan }: { plan: ExpandedPlan }) {
                   Other hotels for your dates
                 </Search>
                 <Search
-                  href={
-                    stay.rental_alternatives_url ??
-                    `https://www.airbnb.com/s/${encodeURIComponent(stay.location)}/homes?${new URLSearchParams({ checkin: stay.check_in, checkout: stay.check_out, adults: String(plan.party?.adults ?? people), children: String(plan.party?.children ?? 0), "room_types[]": "Entire home/apt" })}`
-                  }
+                  href={`https://www.airbnb.com/s/homes?${new URLSearchParams({ query: stay.location, checkin: stay.check_in, checkout: stay.check_out, adults: String(plan.party?.adults ?? people), children: String(plan.party?.children ?? 0), "room_types[]": "Entire home/apt" })}`}
                 >
                   Explore entire homes on Airbnb
                 </Search>
@@ -719,7 +729,7 @@ export default function ExpandedItinerary({ plan }: { plan: ExpandedPlan }) {
                             ? "Explore"
                             : "Travel day"
                     }
-                    sx={{ fontSize: 10 }}
+                    sx={{ fontSize: 12 }}
                   />
                 </div>
                 {day.why_visit && (
@@ -767,7 +777,7 @@ export default function ExpandedItinerary({ plan }: { plan: ExpandedPlan }) {
                         size="small"
                         color="primary"
                         variant="outlined"
-                        sx={{ ml: 1, fontSize: 10 }}
+                        sx={{ ml: 1, fontSize: 12 }}
                       />
                     )}
                     {a.reason && (

@@ -41,9 +41,11 @@ type LegacyPlan = {
 export default function TripItinerary({
   tripId,
   autoStart = false,
+  onPlanningChange,
 }: {
   tripId: string;
   autoStart?: boolean;
+  onPlanningChange?: (active: boolean) => void;
 }) {
   const [status, setStatus] = useState("draft");
   const [plan, setPlan] = useState<LegacyPlan | ExpandedPlan | null>(null);
@@ -58,6 +60,7 @@ export default function TripItinerary({
   const startPlanning = useCallback(async () => {
     const run = ++generation.current;
     setLoading(true);
+    onPlanningChange?.(true);
     setError("");
     setProgress({ label: "Getting your trip ready", percent: null });
     setElapsed(0);
@@ -82,15 +85,20 @@ export default function TripItinerary({
           const result = await api<LegacyPlan | ExpandedPlan>(
             `/api/v1/trips/${tripId}/itinerary`,
           );
-          if (generation.current === run) setPlan(result);
+          if (generation.current === run) {
+            setPlan(result);
+            onPlanningChange?.(false);
+          }
           return;
         }
         // A retried workflow may not have updated a previously failed row yet.
-        if (trip.status === "failed" && attempt >= 3)
+        if (trip.status === "failed" && attempt >= 3) {
+          onPlanningChange?.(false);
           throw new Error(
             trip.planning_error ||
               "Planning couldn’t finish. Try again or adjust your trip details.",
           );
+        }
         await new Promise((resolve) => setTimeout(resolve, 2000));
         if (generation.current !== run) return;
       }
@@ -98,12 +106,22 @@ export default function TripItinerary({
         "Your trip is still being planned. Select ‘Check again’ to pick up where you left off.",
       );
     } catch (e) {
-      if (generation.current === run)
+      if (generation.current === run) {
         setError(e instanceof Error ? e.message : "Unable to plan your trip");
+        // A network error does not mean the workflow stopped. Only unlock
+        // editing after the API confirms it is no longer planning.
+        const trip = await api<{ status: string }>(
+          `/api/v1/trips/${tripId}`,
+        ).catch(() => null);
+        if (generation.current === run && trip && trip.status !== "planning") {
+          setStatus(trip.status);
+          onPlanningChange?.(false);
+        }
+      }
     } finally {
       if (generation.current === run) setLoading(false);
     }
-  }, [tripId]);
+  }, [tripId, onPlanningChange]);
 
   useEffect(() => {
     if (!loading) return;

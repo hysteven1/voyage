@@ -9,6 +9,10 @@ export function GET(request: Request) {
       { status: 400 },
     );
   return Response.json({
-    locations: searchLocations(query, params.get("citiesOnly") === "true"),
+    locations: searchLocations(
+      query,
+      params.get("citiesOnly") === "true",
+      params.get("includeAirports") === "true",
+    ),
   });
 }

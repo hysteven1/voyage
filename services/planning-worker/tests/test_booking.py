@@ -99,7 +99,27 @@ def test_no_matching_flight_preserves_search_link(monkeypatch, options, leg):
     result = provider.flight(leg, options)
     assert result["selection_status"] == "no_matching_offer"
     assert "selected_flight" not in result
-    assert result["alternatives_url"] == leg["search_url"]
+    assert result["alternatives_url"].startswith(
+        "https://www.google.com/travel/flights/search?tfs="
+    )
+
+
+def test_large_flight_group_does_not_submit_unsupported_party_size(
+    monkeypatch, options, leg
+):
+    options.update(adults=10)
+    provider = booking.SerpApi()
+    monkeypatch.setattr(
+        provider,
+        "query",
+        lambda **_: pytest.fail("Large group must not request a misleading quote"),
+    )
+    result = provider.flight(leg, options)
+    assert result["selection_status"] == "group_search_only"
+    assert result["search_travelers"] == 1
+    assert "9 travelers" in result["search_note"]
+    assert "selected_flight" not in result
+    assert "/travel/flights/search?tfs=" in result["alternatives_url"]
 
 
 def test_bare_route_is_never_labeled_selected_flight_link(monkeypatch, options, leg):
@@ -280,6 +300,83 @@ def test_provider_failure_logs_no_credentials(plan, options, monkeypatch, caplog
     assert secret not in caplog.text
     assert "api_key=" not in caplog.text
     assert "airbnb.com" in result["stays"][0]["rental_alternatives_url"]
+
+
+def test_large_group_selects_one_hotel_and_multiplies_room_estimate(
+    plan, options, monkeypatch
+):
+    monkeypatch.setenv("SERPAPI_API_KEY", "unit-test-only")
+    options.update(adults=8, children=4, child_ages=[], rooms=3)
+    plan["travelers"] = 12
+    searches = []
+    prop = {
+        "name": "Example Family Hotel",
+        "type": "hotel",
+        "overall_rating": 4.5,
+        "reviews": 400,
+        "property_token": "family",
+        "total_rate": {"extracted_lowest": 300},
+        "link": "https://example.com/hotel",
+    }
+
+    def query(self, **params):
+        searches.append(params)
+        if params.get("property_token"):
+            raise booking.ProviderError("Detail expansion temporarily unavailable")
+        return {"properties": [prop]}
+
+    monkeypatch.setattr(booking.SerpApi, "query", query)
+    monkeypatch.setattr(booking.SerpApi, "flight", lambda *_: {})
+    result = booking.select_travel_options(
+        {"trip": {"id": "trip", "options": options}, "plan": plan}
+    )
+    assert all(p["adults"] == 4 and p["children"] == 0 for p in searches)
+    assert all("children_ages" not in p for p in searches)
+    stay = result["stays"][0]
+    assert stay["selected_stay"]["name"] == prop["name"]
+    assert stay["selected_stay"]["quoted_total"] == "300.00"
+    assert stay["selected_stay"]["estimated_group_total"] == "900.00"
+    assert stay["estimated_cost"] == "900.00"
+    assert stay["selected_stay"]["rooms_requested"] == 3
+    assert "all rooms are available" in stay["selected_stay"]["capacity_note"]
+    assert "adults=8" in stay["rental_alternatives_url"]
+    assert "children=4" in stay["rental_alternatives_url"]
+
+
+def test_unknown_child_ages_use_labeled_adult_fare_estimate(monkeypatch, options, leg):
+    options.update(children=2, child_ages=[])
+    provider = booking.SerpApi()
+    searches = []
+
+    def query(**params):
+        searches.append(params)
+        return {"best_flights": [offer()]}
+
+    monkeypatch.setattr(provider, "query", query)
+    result = provider.flight(leg, options)
+    assert searches[0]["adults"] == 4
+    assert searches[0]["children"] == 0
+    assert result["selected_flight"]["price_basis"] == "adult_fare_estimate"
+    assert "child fares may differ" in result["selected_flight"]["price_note"]
+
+
+def test_provided_ages_use_infant_child_and_adult_fare_categories(
+    monkeypatch, options, leg
+):
+    options.update(children=3, child_ages=[0, 7, 14])
+    provider = booking.SerpApi()
+    searches = []
+
+    def query(**params):
+        searches.append(params)
+        return {"best_flights": [offer()]}
+
+    monkeypatch.setattr(provider, "query", query)
+    result = provider.flight(leg, options)
+    assert searches[0]["adults"] == 3
+    assert searches[0]["children"] == 1
+    assert searches[0]["infants_in_seat"] == 1
+    assert result["selected_flight"]["price_basis"] == "requested_party"
 
 
 def test_long_city_label_resolves_the_google_city_airport_group_and_caches(monkeypatch):

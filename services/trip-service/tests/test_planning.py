@@ -417,6 +417,7 @@ def test_spending_style_changes_estimates_without_requiring_an_amount(trip):
 
 def test_global_flight_preferences_apply_to_every_flight_leg(trip):
     preferences = {
+        "arrival_scope": "all_flights",
         "departure_scope": "all_flights",
         "max_stops": 0,
         "allow_overnight": False,
@@ -433,6 +434,42 @@ def test_global_flight_preferences_apply_to_every_flight_leg(trip):
         for leg in plan["legs"]
         if leg["mode"] == "flight"
     )
+
+
+def test_after_work_departure_does_not_constrain_later_countries_or_return(trip):
+    trip.update(start_date="2026-12-01", end_date="2026-12-21", origin="London, UK")
+    trip["options"].update(
+        flight_preferences={
+            "departure_scope": "first_flight",
+            "arrival_scope": "return_home",
+            "earliest_departure": "17:00",
+            "latest_arrival": "22:00",
+        },
+        route=[
+            {"location": "Tokyo, Japan"},
+            {"location": "Bangkok, Thailand"},
+            {"location": "Seoul, South Korea"},
+        ],
+    )
+    result = approved(trip)
+    flights = [leg for leg in build_plan(result)["legs"] if leg["mode"] == "flight"]
+    assert len(flights) == 4
+    assert flights[0]["restrictions"]["earliest_departure"] == "17:00"
+    assert all(leg["restrictions"]["earliest_departure"] is None for leg in flights[1:])
+    assert all(leg["restrictions"]["latest_arrival"] is None for leg in flights[:-1])
+    assert flights[-1]["restrictions"]["latest_arrival"] == "22:00"
+    assert all(leg["restrictions"]["allow_overnight"] for leg in flights)
+
+
+def test_child_counts_do_not_require_ages(trip):
+    trip["options"].update(children=4, child_ages=[], adults=5, rooms=3)
+    payload = TripCreate(**{key: value for key, value in trip.items() if key != "id"})
+    assert payload.travelers == 9
+    data = approved({**trip, "options": payload.options.model_dump(mode="json")})
+    plan = build_plan(data)
+    assert plan["travelers"] == 9
+    assert plan["party"] == {"adults": 5, "children": 4}
+    assert plan["stays"][0]["rooms"] == 3
 
 
 @pytest.mark.parametrize("notes", ["", "Prefer a convenient hotel."])

@@ -2,12 +2,14 @@
 // GeoNames via cities.json, CC BY 4.0. Attribution is displayed in the site footer.
 import cities from "cities.json" with { type: "json" };
 import regions from "cities.json/admin1" with { type: "json" };
+import airports from "../data/airports.json" with { type: "json" };
 
 export type LocationSuggestion = {
   id: string;
   label: string;
   detail: string;
-  kind: "city" | "country";
+  kind: "city" | "country" | "airport";
+  value?: string;
 };
 const countryNames = new Intl.DisplayNames(["en"], { type: "region" });
 const regionNames = new Map(
@@ -23,6 +25,7 @@ const normalize = (text: string) =>
     .trim();
 const popular = [
   "Tokyo",
+  "Washington",
   "London",
   "Paris",
   "New York City",
@@ -58,6 +61,7 @@ const popularity = new Map(
 );
 const preferredCountries: Record<string, string> = {
   tokyo: "JP",
+  washington: "US",
   london: "GB",
   paris: "FR",
   "new york city": "US",
@@ -112,11 +116,14 @@ const entries = cities.map((city) => {
     detail: [region, country].filter(Boolean).join(", "),
     kind: "city" as const,
     popularity:
-      preferredCountries[normalize(city.name)] === city.country
+      preferredCountries[normalize(city.name)] === city.country &&
+      (city.name !== "Washington" || region === "District of Columbia")
         ? (popularity.get(normalize(city.name)) ?? 0)
         : 0,
     name: normalize(city.name),
-    search: normalize(`${label} ${region ?? ""} ${city.country}`),
+    search: normalize(
+      `${label} ${region ?? ""} ${city.country} ${city.name === "Washington" && region === "District of Columbia" ? "Washington DC Washington D C WashingtonDC" : ""}`,
+    ),
   };
 });
 const countries = [...new Set(cities.map((city) => city.country))].map(
@@ -134,21 +141,46 @@ const countries = [...new Set(cities.map((city) => city.country))].map(
   },
 );
 
+const airportEntries = airports.map(([code, name, city, country]) => ({
+  id: `airport:${code}`,
+  label: `${name} (${code})`,
+  detail: `${city ? city + ", " : ""}${countryNames.of(country) ?? country} · Airport`,
+  value: code,
+  kind: "airport" as const,
+  popularity: 0,
+  name: normalize(code),
+  search: normalize(
+    `${code} ${name} ${city} ${countryNames.of(country) ?? country} ${city === "Washington" && country === "US" ? "Washington DC Washington D C WashingtonDC" : ""}`,
+  ),
+}));
+
 export function searchLocations(
   input: string,
   citiesOnly = false,
+  includeAirports = false,
 ): LocationSuggestion[] {
-  const query = normalize(input.slice(0, 80));
+  const query = normalize(input.slice(0, 80)).replace(
+    /\bwashington d c\b|\bwashingtondc\b/g,
+    "washington dc",
+  );
   if (query.length === 1) return [];
   const tokens = query.split(" ").filter(Boolean);
-  const matches = (citiesOnly ? entries : [...countries, ...entries]).filter(
-    (entry) =>
-      !query
-        ? entry.popularity > 0
-        : tokens.every((token) => entry.search.includes(token)),
+  const choices = citiesOnly ? entries : [...countries, ...entries];
+  const matches = (
+    includeAirports ? [...choices, ...airportEntries] : choices
+  ).filter((entry) =>
+    !query
+      ? entry.popularity > 0
+      : tokens.every((token) => entry.search.includes(token)),
   );
   const score = (entry: (typeof matches)[number]) =>
-    (entry.name === query ? 10000 : entry.name.startsWith(query) ? 1000 : 0) +
+    (entry.name === query
+      ? entry.kind === "airport"
+        ? 30000
+        : 10000
+      : entry.name.startsWith(query)
+        ? 1000
+        : 0) +
     (entry.name.startsWith(query) && entry.popularity > 0 ? 20000 : 0) +
     entry.popularity;
   matches.sort((a, b) => score(b) - score(a) || a.label.localeCompare(b.label));
@@ -160,5 +192,11 @@ export function searchLocations(
       return true;
     })
     .slice(0, 10)
-    .map(({ id, label, detail, kind }) => ({ id, label, detail, kind }));
+    .map((entry) => ({
+      id: entry.id,
+      label: entry.label,
+      detail: entry.detail,
+      kind: entry.kind,
+      ...("value" in entry ? { value: entry.value } : {}),
+    }));
 }

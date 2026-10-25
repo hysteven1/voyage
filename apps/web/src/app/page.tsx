@@ -117,6 +117,7 @@ export default function Home() {
   const [step, setStep] = useState(0);
   const [tripId, setTripId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [planningActive, setPlanningActive] = useState(false);
   const [error, setError] = useState("");
   const [attempted, setAttempted] = useState(false);
   const [budgetInputInvalid, setBudgetInputInvalid] = useState(false);
@@ -198,13 +199,28 @@ export default function Home() {
     setLoading(true);
     const options: Options = {
       ...o,
+      child_ages:
+        o.child_ages.length === o.children &&
+        o.child_ages.every((age) => age >= 0)
+          ? o.child_ages
+          : [],
       endpoint: o.journey === "already_there" ? "one_way" : "return",
       end_location: null,
       route: o.route.map((stop, index) => ({
         ...stop,
-        flight_preferences: { ...(o.flight_preferences ?? flightDefaults), earliest_departure: index === 0 ? (o.flight_preferences?.earliest_departure ?? null) : null },
+        flight_preferences: {
+          ...(o.flight_preferences ?? flightDefaults),
+          latest_arrival: null,
+          earliest_departure:
+            index === 0
+              ? (o.flight_preferences?.earliest_departure ?? null)
+              : null,
+        },
       })),
-      return_flight_preferences: { ...(o.flight_preferences ?? flightDefaults), earliest_departure: null },
+      return_flight_preferences: {
+        ...(o.flight_preferences ?? flightDefaults),
+        earliest_departure: null,
+      },
     };
     const payload = {
       ...form,
@@ -229,6 +245,7 @@ export default function Home() {
         options: suggested.options,
       });
       setForm((old) => ({ ...old, options: suggested.options }));
+      setPlanningActive(true);
       setTripId(result.id);
       requestAnimationFrame(() =>
         document
@@ -252,7 +269,10 @@ export default function Home() {
       ...o,
       adults,
       children,
-      child_ages: [],
+      child_ages: Array.from(
+        { length: children },
+        (_, index) => o.child_ages[index] ?? -1,
+      ),
       rooms: Math.min(count, Math.max(Math.ceil(count / 4), o.rooms)),
     });
   }
@@ -382,7 +402,8 @@ export default function Home() {
                             value={form.origin ?? ""}
                             required
                             onChange={(value) => field("origin", value)}
-                            placeholder="Start typing a city, e.g. New York"
+                            placeholder="City or airport, e.g. Washington DC or IAD"
+                            includeAirports={o.journey === "flying"}
                             citiesOnly
                           />
                         )}
@@ -509,6 +530,55 @@ export default function Home() {
                             onChange={(n) => option("rooms", n)}
                           />
                         </div>
+                        {o.children > 0 && (
+                          <Stack spacing={1} sx={{ mt: -0.5 }}>
+                            <Typography variant="body2" color="text.secondary">
+                              Some airlines offer lower fares for children,
+                              depending on age and route. Enter all child ages
+                              to help us search the right fares, or leave them
+                              blank for an estimate using adult fares.
+                            </Typography>
+                            <div className="field-grid three">
+                              {Array.from(
+                                { length: o.children },
+                                (_, index) => (
+                                  <TextField
+                                    key={index}
+                                    select
+                                    label={`Child ${index + 1} age (optional)`}
+                                    value={
+                                      (o.child_ages[index] ?? -1) < 0
+                                        ? ""
+                                        : o.child_ages[index]
+                                    }
+                                    helperText="Age on the departure date"
+                                    onChange={(event) =>
+                                      option(
+                                        "child_ages",
+                                        Array.from(
+                                          { length: o.children },
+                                          (_, child) =>
+                                            child === index
+                                              ? event.target.value === ""
+                                                ? -1
+                                                : Number(event.target.value)
+                                              : (o.child_ages[child] ?? -1),
+                                        ),
+                                      )
+                                    }
+                                  >
+                                    <MenuItem value="">Not specified</MenuItem>
+                                    {Array.from({ length: 18 }, (_, age) => (
+                                      <MenuItem key={age} value={age}>
+                                        {age === 0 ? "Under 1" : age}
+                                      </MenuItem>
+                                    ))}
+                                  </TextField>
+                                ),
+                              )}
+                            </div>
+                          </Stack>
+                        )}
                       </FormSection>
                       <FormSection
                         title="What feels right for your trip?"
@@ -745,6 +815,7 @@ export default function Home() {
                   <Stack direction="row" sx={{ gap: 1, flexWrap: "wrap" }}>
                     <Button
                       variant="outlined"
+                      disabled={planningActive}
                       startIcon={<ArrowBackRounded />}
                       onClick={() => {
                         setTripId(null);
@@ -755,6 +826,7 @@ export default function Home() {
                     </Button>
                     <Button
                       startIcon={<AddRounded />}
+                      disabled={planningActive}
                       onClick={() => {
                         setTripId(null);
                         setForm(initial);
@@ -765,7 +837,22 @@ export default function Home() {
                     </Button>
                   </Stack>
                 </Paper>
-                <TripItinerary key={tripId} tripId={tripId} autoStart />
+                {planningActive && (
+                  <Typography
+                    variant="body2"
+                    color="text.secondary"
+                    sx={{ px: 1, mb: 2 }}
+                  >
+                    You can edit your details or start another trip once
+                    planning finishes.
+                  </Typography>
+                )}
+                <TripItinerary
+                  key={tripId}
+                  tripId={tripId}
+                  autoStart
+                  onPlanningChange={setPlanningActive}
+                />
               </>
             )}
           </div>
@@ -1040,7 +1127,7 @@ function FlightFields({
       <div className="field-grid two">
         <TextField
           label="Leave home after (optional)"
-          helperText="First outbound flight only—for example, after work."
+          helperText="Applies to your first outbound flight."
           type="time"
           value={value.earliest_departure ?? ""}
           slotProps={{
@@ -1061,8 +1148,8 @@ function FlightFields({
           }
         />
         <TextField
-          label="Arrive by (optional)"
-          helperText="At each flight’s destination, in local time."
+          label="Get home by (optional)"
+          helperText="Return flight only, in your home airport’s local time. Allow extra time for the journey home."
           type="time"
           value={value.latest_arrival ?? ""}
           slotProps={{
@@ -1083,11 +1170,6 @@ function FlightFields({
           }
         />
       </div>
-      <Typography variant="caption" color="text.secondary">
-        Departure time only applies when leaving home. Arrival time applies to
-        each flight, including the return. Overnight flights may arrive the next
-        day.
-      </Typography>
     </Stack>
   );
 }

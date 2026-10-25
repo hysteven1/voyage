@@ -27,3 +27,16 @@ test("ambiguous city names include regions where appropriate", () => {
   assert.ok(results.length > 1);
   assert.ok(results.every(item => item.label.split(",").length >= 3));
 });
+
+test("Washington DC aliases work without the formal region name", () => {
+  for (const query of ["Washington DC", "Washington D.C.", "WashingtonDC"]) {
+    assert.equal(searchLocations(query, true, true)[0].label, "Washington, District of Columbia, United States");
+  }
+});
+
+test("origins can search airports by code, airport name or city", () => {
+  assert.equal(searchLocations("IAD", true, true)[0].value, "IAD");
+  assert.ok(searchLocations("Dulles", true, true).some(item => item.value === "IAD"));
+  assert.ok(searchLocations("Washington DC", true, true).some(item => item.kind === "airport"));
+  assert.ok(searchLocations("IAD", true).every(item => item.kind !== "airport"));
+});

@@ -18,7 +18,12 @@ import airportsdata
 from temporalio import activity
 from temporalio.exceptions import ApplicationError
 
-from app.booking_links import child_count, hotel_room_options, stay_search_links
+from app.booking_links import (
+    child_count,
+    google_flights_url,
+    hotel_room_options,
+    stay_search_links,
+)
 from app.planning import build_plan, money
 
 logger = logging.getLogger("voyage.activities")
@@ -182,16 +187,31 @@ class SerpApi:
 
     def flight(self, leg, options):
         prefs = leg.get("restrictions") or options.get("flight_preferences", {})
+        origin_id = self.city_id(leg["origin"])
+        destination_id = self.city_id(leg["destination"])
+        fallback = google_flights_url(leg, options, origin_id, destination_id)
+        leg["alternatives_url"] = fallback
+        if options["adults"] + child_count(options) > 9:
+            return {
+                "selection_status": "group_search_only",
+                "alternatives_url": fallback,
+                "search_travelers": 1,
+                "search_note": "Google Flights supports searches for up to 9 travelers. This link shows 1 adult. Contact the airline for availability and a quote for your full group.",
+            }
         unknown_child_rates = child_count(options) > 0 and not options.get("child_ages")
         params = {
             "engine": "google_flights",
-            "departure_id": self.city_id(leg["origin"]),
-            "arrival_id": self.city_id(leg["destination"]),
+            "departure_id": origin_id,
+            "arrival_id": destination_id,
             "outbound_date": leg["departure_date"],
             "type": 2,
             "adults": options["adults"]
-            + (child_count(options) if unknown_child_rates else 0),
-            "children": sum(age >= 2 for age in options["child_ages"]),
+            + (
+                child_count(options)
+                if unknown_child_rates
+                else sum(age >= 12 for age in options["child_ages"])
+            ),
+            "children": sum(2 <= age < 12 for age in options["child_ages"]),
             "infants_in_seat": sum(age < 2 for age in options["child_ages"]),
             "stops": int(prefs.get("max_stops", 1)) + 1,
             "deep_search": "true",
@@ -269,7 +289,7 @@ class SerpApi:
         if not candidates:
             return {
                 "selection_status": "no_matching_offer",
-                "alternatives_url": alternatives or leg["search_url"],
+                "alternatives_url": alternatives or fallback,
             }
         # Respect hard preferences first; trade a little fare for shorter travel at value/upscale tiers.
         weight = {"budget": 0, "value": 0.25, "upscale": 0.6}[
@@ -318,7 +338,7 @@ class SerpApi:
             selected_url = None
         return {
             "selection_status": "selected",
-            "alternatives_url": alternatives or leg["search_url"],
+            "alternatives_url": alternatives or fallback,
             "selected_flight": {
                 "airlines": list(dict.fromkeys(s.get("airline", "") for s in segments)),
                 "flight_numbers": [s["flight_number"] for s in segments],
@@ -410,7 +430,12 @@ class SerpApi:
         if not candidates:
             return {**updates, "selection_status": "no_matching_offer"}
         _, selected = min(candidates, key=lambda item: item[0])
-        details = self.query(**params, property_token=selected["property_token"])
+        try:
+            details = self.query(**params, property_token=selected["property_token"])
+        except ProviderError:
+            # The search already supplied a real property and stay quote.
+            # A failed price-source expansion must not erase that recommendation.
+            details = selected
         if (
             details.get("property_token", selected["property_token"])
             != selected["property_token"]
@@ -505,6 +530,15 @@ def refresh_estimates(plan):
 @activity.defn
 def select_travel_options(data):
     plan, trip = deepcopy(data["plan"]), data["trip"]
+    for leg in plan["legs"]:
+        if leg["mode"] == "flight":
+            leg["search_url"] = "https://www.google.com/travel/flights"
+            if trip["options"]["adults"] + child_count(trip["options"]) > 9:
+                leg.update(
+                    selection_status="group_search_only",
+                    search_travelers=1,
+                    search_note="Google Flights supports searches for up to 9 travelers. Search for 1 adult to explore routes, then contact the airline for your full group.",
+                )
     for stay in plan["stays"]:
         stay.update(stay_search_links(stay, trip["options"]))
     provider = SerpApi()
@@ -544,7 +578,18 @@ def select_travel_options(data):
                 type(exc).__name__,
                 extra={"trip_id": trip["id"]},
             )
-            return kind, index, {"selection_status": "unavailable"}
+            return (
+                kind,
+                index,
+                {
+                    "selection_status": "unavailable",
+                    **(
+                        {"alternatives_url": item["alternatives_url"]}
+                        if item.get("alternatives_url")
+                        else {}
+                    ),
+                },
+            )
 
     with ThreadPoolExecutor(max_workers=4) as executor:
         flights = list(executor.map(select, flight_tasks))

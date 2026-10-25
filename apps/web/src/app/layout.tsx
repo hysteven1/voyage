@@ -4,7 +4,7 @@ import VoyageProvider from "@/components/VoyageProvider";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Voyage — Your kind of trip",
+  title: "Voyage: Your kind of trip",
   description:
     "Big adventures, slow mornings, and everything in between. Plan a personal itinerary with a route and budget that work for you.",
 };

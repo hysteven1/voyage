@@ -10,6 +10,7 @@ import {
 } from "@mui/material";
 import LocationOnOutlined from "@mui/icons-material/LocationOnOutlined";
 import PublicOutlined from "@mui/icons-material/PublicOutlined";
+import FlightTakeoffRounded from "@mui/icons-material/FlightTakeoffRounded";
 import type { LocationSuggestion } from "@/lib/location-search";
 
 export default function LocationAutocomplete({
@@ -19,6 +20,7 @@ export default function LocationAutocomplete({
   error = false,
   placeholder,
   citiesOnly = false,
+  includeAirports = false,
   onChange,
 }: {
   label: string;
@@ -27,6 +29,7 @@ export default function LocationAutocomplete({
   error?: boolean;
   placeholder?: string;
   citiesOnly?: boolean;
+  includeAirports?: boolean;
   onChange: (value: string) => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -45,6 +48,7 @@ export default function LocationAutocomplete({
         const params = new URLSearchParams({
           q: query,
           citiesOnly: String(citiesOnly),
+          includeAirports: String(includeAirports),
         });
         const response = await fetch(`/api/locations?${params}`, {
           signal: controller.signal,
@@ -62,7 +66,7 @@ export default function LocationAutocomplete({
       clearTimeout(timer);
       controller.abort();
     };
-  }, [query, citiesOnly, open]);
+  }, [query, citiesOnly, includeAirports, open]);
   const loading = open && result.query !== query;
   return (
     <Autocomplete<LocationSuggestion, false, false, true>
@@ -89,7 +93,9 @@ export default function LocationAutocomplete({
         if (reason === "input" || reason === "clear") onChange(next);
       }}
       onChange={(_, next) =>
-        onChange(typeof next === "string" ? next : (next?.label ?? ""))
+        onChange(
+          typeof next === "string" ? next : (next?.value ?? next?.label ?? ""),
+        )
       }
       onHighlightChange={(_, option) => {
         highlighted.current = option;
@@ -108,7 +114,7 @@ export default function LocationAutocomplete({
             result.locations.find(
               (item) => item.id === highlighted.current?.id,
             ) ?? result.locations[0];
-          onChange(selected.label);
+          onChange(selected.value ?? selected.label);
           setOpen(false);
         }
       }}
@@ -123,7 +129,9 @@ export default function LocationAutocomplete({
             {...rest}
             sx={{ gap: 1.5, py: "12px !important" }}
           >
-            {option.kind === "city" ? (
+            {option.kind === "airport" ? (
+              <FlightTakeoffRounded color="primary" />
+            ) : option.kind === "city" ? (
               <LocationOnOutlined color="primary" />
             ) : (
               <PublicOutlined color="primary" />

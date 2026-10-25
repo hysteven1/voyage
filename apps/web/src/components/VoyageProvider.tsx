@@ -26,6 +26,8 @@ const theme = createTheme({
     h2: { fontWeight: 600, letterSpacing: "-0.04em" },
     h3: { fontWeight: 600, letterSpacing: "-0.025em" },
     button: { textTransform: "none", fontWeight: 600, letterSpacing: "0.01em" },
+    body2: { fontSize: "0.9375rem", lineHeight: 1.5 },
+    caption: { fontSize: "0.8125rem", lineHeight: 1.5 },
   },
   shape: { borderRadius: 14 },
   components: {
@@ -45,6 +47,7 @@ const theme = createTheme({
       },
     },
     MuiTextField: { defaultProps: { fullWidth: true, variant: "outlined" } },
+    MuiFormHelperText: { styleOverrides: { root: { fontSize: "0.8125rem" } } },
     MuiPaper: { defaultProps: { elevation: 0 } },
     MuiChip: { styleOverrides: { root: { fontWeight: 500 } } },
     MuiAlert: { styleOverrides: { root: { borderRadius: 12 } } },

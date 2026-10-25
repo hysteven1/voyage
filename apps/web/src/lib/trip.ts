@@ -1,5 +1,6 @@
 export type FlightPreferences = {
   departure_scope?: "all_flights" | "first_flight";
+  arrival_scope?: "all_flights" | "return_home";
   max_stops: number;
   earliest_departure: string | null;
   latest_arrival: string | null;
@@ -49,6 +50,7 @@ export const API_URL =
   process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 export const flightDefaults: FlightPreferences = {
   departure_scope: "first_flight",
+  arrival_scope: "return_home",
   max_stops: 1,
   earliest_departure: null,
   latest_arrival: null,

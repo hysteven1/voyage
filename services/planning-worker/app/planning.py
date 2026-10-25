@@ -17,6 +17,7 @@ from app.day_planning import daily_plans, day_trip_limit
 
 class FlightPreferences(BaseModel):
     departure_scope: Literal["all_flights", "first_flight"] = "all_flights"
+    arrival_scope: Literal["all_flights", "return_home"] = "all_flights"
     max_stops: int = Field(default=1, ge=0, le=2)
     earliest_departure: str | None = Field(
         default=None, pattern=r"^([01]\d|2[0-3]):[0-5]\d$"
@@ -65,10 +66,14 @@ class TripOptions(BaseModel):
 
     @model_validator(mode="after")
     def validate_group(self):
-        if self.children is None:
+        if self.children is None or (self.children == 0 and self.child_ages):
             self.children = len(self.child_ages)
         if any(age < 0 or age > 17 for age in self.child_ages):
             raise ValueError("Child ages must be between 0 and 17")
+        if self.child_ages and len(self.child_ages) != self.children:
+            raise ValueError(
+                "Provide an age for every child, or leave all ages unspecified"
+            )
         if len({s.location.strip().casefold() for s in self.route}) != len(self.route):
             raise ValueError("List each destination once and adjust its nights")
         if self.rooms * 4 < self.adults + self.children:
@@ -88,6 +93,10 @@ def scoped_flight_preferences(options, preferences, index=None):
     result = (preferences or options.flight_preferences).model_copy()
     if options.flight_preferences.departure_scope == "first_flight" and index != 0:
         result.earliest_departure = None
+    if options.flight_preferences.arrival_scope == "return_home" and (
+        index is not None or options.endpoint != "return"
+    ):
+        result.latest_arrival = None
     return result
 
 
@@ -420,8 +429,12 @@ def propose_route(trip):
     for i, stop in enumerate(options.route):
         stop.nights = base + (i < extra)
     for index, stop in enumerate(options.route):
-        stop.flight_preferences = scoped_flight_preferences(options, stop.flight_preferences, index)
-    options.return_flight_preferences = scoped_flight_preferences(options, options.return_flight_preferences)
+        stop.flight_preferences = scoped_flight_preferences(
+            options, stop.flight_preferences, index
+        )
+    options.return_flight_preferences = scoped_flight_preferences(
+        options, options.return_flight_preferences
+    )
     return {
         "options": options.model_dump(mode="json"),
         "assumptions": assumptions,

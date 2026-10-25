@@ -7,7 +7,7 @@ https://serpapi.com/blog/decoding-protobuf-messages-without-schema/
 from base64 import urlsafe_b64encode
 from datetime import date
 from math import ceil
-from urllib.parse import quote, urlencode
+from urllib.parse import urlencode
 
 
 def child_count(options):
@@ -30,11 +30,10 @@ def hotel_room_options(options):
 def stay_search_links(stay, options):
     return {
         "alternatives_url": google_hotels_url(stay, options),
-        "rental_alternatives_url": "https://www.airbnb.com/s/"
-        + quote(stay["location"], safe="")
-        + "/homes?"
+        "rental_alternatives_url": "https://www.airbnb.com/s/homes?"
         + urlencode(
             {
+                "query": stay["location"],
                 "checkin": stay["check_in"],
                 "checkout": stay["check_out"],
                 "adults": options["adults"],
@@ -43,6 +42,48 @@ def stay_search_links(stay, options):
             }
         ),
     }
+
+
+def google_flights_url(leg, options, origin_id=None, destination_id=None):
+    """One-way Google Flights state; wire fields documented by fast-flights.
+
+    https://github.com/AWeirdDev/flights/blob/dev/fast_flights/pb/flights.proto
+    """
+    if not origin_id or not destination_id:
+        return "https://www.google.com/travel/flights"
+    prefs = leg.get("restrictions") or {}
+    flight = (
+        field(2, leg["departure_date"].encode())
+        + field(13, field(2, origin_id.encode()))
+        + field(14, field(2, destination_id.encode()))
+        + field(5, prefs.get("max_stops", 1))
+    )
+    if prefs.get("earliest_departure"):
+        flight += field(8, int(prefs["earliest_departure"].split(":")[0]))
+    if prefs.get("latest_arrival"):
+        flight += field(11, int(prefs["latest_arrival"].split(":")[0]))
+    count = options["adults"] + child_count(options)
+    if count > 9:
+        passengers = [1]
+    elif options.get("child_ages"):
+        passengers = [1] * options["adults"] + [
+            3 if age < 2 else 2 if age < 12 else 1 for age in options["child_ages"]
+        ]
+    else:
+        passengers = [1] * count
+    state = (
+        field(3, flight)
+        + b"".join(field(8, passenger) for passenger in passengers)
+        + field(9, 1)
+        + field(19, 2)
+    )
+    return "https://www.google.com/travel/flights/search?" + urlencode(
+        {
+            "tfs": urlsafe_b64encode(state).decode().rstrip("="),
+            "hl": "en",
+            "curr": "USD",
+        }
+    )
 
 
 def varint(value):

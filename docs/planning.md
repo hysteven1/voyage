@@ -86,7 +86,7 @@ cd ../planning-worker
 .venv/bin/python -m pytest
 .venv/bin/ruff check app tests
 cd ../../apps/web
-npx tsc --noEmit
+npm run typecheck
 npm run lint
 npm run build
 ```
@@ -127,7 +127,7 @@ npm ci
 npm run test:locations
 npx playwright install --with-deps chromium
 npm run test:ui
-npx tsc --noEmit
+npm run typecheck
 npm run lint
 npm run build
 ```

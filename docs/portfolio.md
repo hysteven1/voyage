@@ -26,11 +26,22 @@ and spending controls. Back claims with [verification evidence](validation.md).
 
 Resume wording after local verification:
 
-> Built reproducible CI and GHCR publishing workflows for a Next.js/FastAPI travel
-> planner; implemented and locally verified Helm deployment with serialized database
-> migrations, durable Temporal orchestration, non-root containers, health probes,
-> and a real PostgreSQL/Temporal integration smoke test; configured Argo CD GitOps
-> promotion with constrained deployment permissions.
+**Voyage — AI-Powered Travel Planning Platform | Personal Project**
+
+- Developed a full-stack travel planner using Next.js, FastAPI, and PostgreSQL
+  to generate personalized, budget-aware itineraries with AI recommendations
+  and optional live flight and hotel searches.
+- Designed Temporal workflows to coordinate background planning, parallel
+  activities, automated retries, checkpoint recovery, and transactional
+  itinerary persistence.
+- Integrated OpenAI structured outputs with deterministic validation of trip
+  dates, schedules, budgets, and traveler preferences.
+- Built GitHub Actions CI and GHCR publishing workflows; implemented and locally
+  validated Kubernetes deployments using Helm, migration Jobs, health probes,
+  and non-root containers, with Argo CD GitOps configuration.
+
+**Technologies:** Python, TypeScript, FastAPI, Next.js, PostgreSQL, Temporal,
+OpenAI API, Docker, GitHub Actions, GHCR, Kubernetes, Helm, Argo CD
 
 Only describe remote CI publication or Argo synchronization as demonstrated after
 performing and recording those steps. Do not claim uptime, user scale, cloud

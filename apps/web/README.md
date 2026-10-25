@@ -17,7 +17,7 @@ it is not needed for Compose/Kubernetes. `/api/locations` uses bundled datasets.
 
 ```bash
 npm run lint
-npx tsc --noEmit
+npm run typecheck
 npm run test:locations
 npm run test:proxy
 npm run build
@@ -25,6 +25,7 @@ npx playwright install --with-deps chromium
 npm run test:ui
 ```
 
+Type checking generates Next.js route types first, so it works in a fresh checkout.
 Browser tests mock the planning API and use a fixed clock. The proxy test creates
 a temporary local server. The production Docker image uses Next standalone output
 and runs as UID 10001; `npm run dev` remains for native hot reload only.

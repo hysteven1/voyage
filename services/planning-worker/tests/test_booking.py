@@ -168,11 +168,16 @@ def test_hotel_selects_reviewed_property_and_preserves_dated_alternatives(
     assert result["selected_stay"]["name"] == prop["name"]
     assert result["selected_stay"]["booking_url"] == booking_url
     assert result["selected_stay"]["quoted_total"] == "700.00"
-    assert result["alternatives_url"] == alternatives
+    assert result["alternatives_url"].startswith(
+        "https://www.google.com/travel/search?"
+    )
+    assert "ts=" in result["alternatives_url"]
+    assert searches[0]["q"] == "Tokyo, Japan hotels"
     assert searches[0]["check_out_date"] == "2027-02-10"
-    assert searches[0]["children_ages"] == "1,7"
+    assert searches[0]["adults"] == 4
+    assert "children_ages" not in searches[0]
     assert "checkin=2027-02-03" in result["rental_alternatives_url"]
-    assert "infants=1" in result["rental_alternatives_url"]
+    assert "children=2" in result["rental_alternatives_url"]
 
 
 @pytest.mark.parametrize(
@@ -193,7 +198,14 @@ def plan():
     return {
         "travelers": 2,
         "legs": [{"mode": "flight", "estimated_cost": "400"}],
-        "stays": [{"location": "Tokyo", "estimated_cost": "700"}],
+        "stays": [
+            {
+                "location": "Tokyo",
+                "estimated_cost": "700",
+                "check_in": "2027-02-03",
+                "check_out": "2027-02-10",
+            }
+        ],
         "destination_estimates": [
             {"location": "Tokyo", "lodging": "600", "food": "100", "activities": "50"}
         ],
@@ -231,6 +243,7 @@ def test_no_key_uses_existing_estimates(plan, options, monkeypatch):
     )
     assert result["booking_source"] == "not_configured"
     assert result["budget"] == plan["budget"]
+    assert "airbnb.com" in result["stays"][0]["rental_alternatives_url"]
 
 
 def test_activity_combines_quotes_and_does_not_mutate_input(plan, options, monkeypatch):
@@ -266,6 +279,7 @@ def test_provider_failure_logs_no_credentials(plan, options, monkeypatch, caplog
     assert result["budget"] == plan["budget"]
     assert secret not in caplog.text
     assert "api_key=" not in caplog.text
+    assert "airbnb.com" in result["stays"][0]["rental_alternatives_url"]
 
 
 def test_long_city_label_resolves_the_google_city_airport_group_and_caches(monkeypatch):

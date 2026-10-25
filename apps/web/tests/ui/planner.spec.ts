@@ -126,26 +126,41 @@ async function mockPlanner(
           per_person_total: "787.75",
           spending_style: "value",
         },
-        destination_highlights: withOffers
-          ? [
-              {
-                location: "Tokyo, Japan",
-                highlights: [
-                  {
-                    name: "Shibuya Sky",
-                    reason: "A broad view of the city skyline.",
-                  },
-                ],
-                day_trips: [
-                  {
-                    name: "Hakone",
-                    reason: "Mountains and lakes beyond Tokyo.",
-                    travel_minutes: 210,
-                  },
-                ],
-              },
-            ]
-          : [],
+        destination_highlights:
+          withOffers || partial
+            ? [
+                {
+                  location: "Tokyo, Japan",
+                  highlights: [
+                    {
+                      name: "Shibuya Sky",
+                      reason: "A broad view of the city skyline.",
+                    },
+                  ],
+                  day_trips: [
+                    {
+                      name: "Hakone",
+                      reason: "Mountains and lakes beyond Tokyo.",
+                      travel_minutes: 210,
+                    },
+                  ],
+                },
+                ...(partial
+                  ? [
+                      {
+                        location: "Kyoto, Japan",
+                        highlights: [
+                          {
+                            name: "Kiyomizu-dera",
+                            reason: "Temple views over Kyoto.",
+                          },
+                        ],
+                        day_trips: [],
+                      },
+                    ]
+                  : []),
+              ]
+            : [],
         destination_estimates: [
           {
             location: "Tokyo, Japan",
@@ -229,6 +244,21 @@ async function mockPlanner(
                 }
               : {}),
           },
+          ...(partial
+            ? [
+                {
+                  location: "Kyoto, Japan",
+                  area: "Kyoto Station",
+                  check_in: "2026-11-03",
+                  check_out: "2026-11-08",
+                  rooms: 1,
+                  type: "hotel",
+                  estimated_cost: "100",
+                  search_url: "https://www.google.com/travel/search?q=Kyoto",
+                  criteria: "Near transit",
+                },
+              ]
+            : []),
         ],
         rental_car: null,
         days: [
@@ -856,5 +886,67 @@ test("legacy partial suggestions keep a clean route title without the removed wa
   ).toBeVisible();
   await expect(
     page.getByText(/No placeholder activities or visit costs have been added/),
+  ).toBeVisible();
+  await expect(
+    page
+      .getByRole("region", { name: "Days in Kyoto, Japan" })
+      .getByRole("heading", { name: "Kyoto, Japan", exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Highlights in Kyoto, Japan" }),
+  ).toBeVisible();
+  expect(
+    await page
+      .getByRole("heading", { name: "Highlights in Kyoto, Japan" })
+      .evaluate(
+        (element) =>
+          !!(
+            element.compareDocumentPosition(
+              document.querySelectorAll(".day-heading")[1],
+            ) & Node.DOCUMENT_POSITION_FOLLOWING
+          ),
+      ),
+  ).toBe(true);
+  await expect(
+    page.getByText("The details behind your plan", { exact: true }),
+  ).toHaveCount(0);
+  await expect(
+    page.getByRole("link", { name: "An easy neighborhood walk" }),
+  ).toHaveCount(0);
+});
+
+test("planning shows live workflow stages before the itinerary is ready", async ({
+  page,
+}) => {
+  await page.getByRole("button", { name: /Already there/ }).click();
+  await page
+    .getByRole("combobox", { name: "Where", exact: true })
+    .fill("Tokyo, Japan");
+  await chooseDates(page);
+  await page.getByRole("button", { name: "Make it personal" }).click();
+  await mockPlanner(page);
+  let complete = false;
+  await page.route("**/api/v1/trips/test-trip", (route) =>
+    route.fulfill({ json: { status: complete ? "completed" : "planning" } }),
+  );
+  await page.route("**/api/v1/trips/test-trip/progress", (route) =>
+    route.fulfill({
+      json: {
+        stage: "travel",
+        label: "Finding flights and places to stay",
+        percent: 75,
+      },
+    }),
+  );
+  await page.getByRole("button", { name: "Plan my trip" }).click();
+  await expect(
+    page.getByText("Finding flights and places to stay", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("progressbar", { name: "Trip planning progress" }),
+  ).toHaveAttribute("aria-valuenow", "75");
+  complete = true;
+  await expect(
+    page.getByRole("region", { name: "Your itinerary" }),
   ).toBeVisible();
 });

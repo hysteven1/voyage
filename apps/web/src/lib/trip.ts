@@ -1,4 +1,5 @@
 export type FlightPreferences = {
+  departure_scope?: "all_flights" | "first_flight";
   max_stops: number;
   earliest_departure: string | null;
   latest_arrival: string | null;
@@ -21,6 +22,7 @@ export type Options = {
   return_flight_preferences: FlightPreferences | null;
   adults: number;
   child_ages: number[];
+  children: number;
   rooms: number;
   accessibility: string;
   budget_basis?: "per_person" | "group";
@@ -46,6 +48,7 @@ export type TripForm = {
 export const API_URL =
   process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 export const flightDefaults: FlightPreferences = {
+  departure_scope: "first_flight",
   max_stops: 1,
   earliest_departure: null,
   latest_arrival: null,

@@ -305,3 +305,16 @@ also rejects incomplete plans before any database write. This cannot guarantee a
 external provider is always available, but failures are no longer saved as completed
 empty itineraries. Existing completed itineraries are preserved. Route titles are joined from
 structured locations with ` → ` instead of trusting AI-generated separators.
+
+Completed city batches are checkpointed with Temporal heartbeats, so an activity
+retry resumes instead of generating successful batches again. The API's
+`GET /api/v1/trips/{id}/progress` reads the workflow stage; the frontend shows
+that stage, a progress bar and elapsed time while polling. The planning model is
+unchanged. City headings and highlights appear directly before that city's days.
+
+Hotel provider queries use a concise city name instead of AI neighborhood prose,
+which can cause Google Hotels to return no results. Hotel comparison links open
+Google Hotels directly with location, stay dates, guest ages, accommodation type
+and the 4+ rating filter encoded in its `ts` search state. This format follows
+[SerpApi's Google Hotels search-state analysis](https://serpapi.com/blog/decoding-protobuf-messages-without-schema/).
+Room counts and final capacity still need confirmation with the selected property.

@@ -417,6 +417,7 @@ def test_spending_style_changes_estimates_without_requiring_an_amount(trip):
 
 def test_global_flight_preferences_apply_to_every_flight_leg(trip):
     preferences = {
+        "departure_scope": "all_flights",
         "max_stops": 0,
         "allow_overnight": False,
         "earliest_departure": "17:00",

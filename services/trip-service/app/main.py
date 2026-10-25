@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import os
 import time
@@ -175,13 +176,48 @@ def list_trips(
 ):
     from sqlalchemy import select
 
-    statement = (
-        select(Trip)
-        .order_by(Trip.created_at.desc())
-        .limit(100)
-    )
+    statement = select(Trip).order_by(Trip.created_at.desc()).limit(100)
 
     return db.scalars(statement).all()
+
+
+@app.get("/api/v1/trips/{trip_id}/progress")
+async def trip_planning_progress(trip_id: uuid.UUID):
+    def read_status():
+        with Session(engine) as db:
+            trip = db.get(Trip, trip_id)
+            if trip is None:
+                raise HTTPException(status_code=404, detail="Trip not found")
+            return trip.status
+
+    trip_status = await run_in_threadpool(read_status)
+    if trip_status == "completed":
+        return {
+            "stage": "completed",
+            "label": "Your itinerary is ready",
+            "percent": 100,
+        }
+    if trip_status == "failed":
+        return {
+            "stage": "failed",
+            "label": "Planning needs another attempt",
+            "percent": 0,
+        }
+
+    async def query_progress():
+        client = await Client.connect(os.getenv("TEMPORAL_ADDRESS", "localhost:7233"))
+        return await client.get_workflow_handle(f"plan-trip-{trip_id}").query(
+            "planning_progress"
+        )
+
+    try:
+        return await asyncio.wait_for(query_progress(), timeout=3)
+    except Exception:  # noqa: BLE001 - progress is optional; older workers may not expose the query.
+        return {
+            "stage": "planning",
+            "label": "Building your itinerary",
+            "percent": None,
+        }
 
 
 @app.post("/api/v1/trips/{trip_id}/plan")
@@ -227,9 +263,7 @@ async def start_trip_planning(
             detail="Trip planning already completed",
         )
 
-    client = await Client.connect(
-        os.getenv("TEMPORAL_ADDRESS", "localhost:7233")
-    )
+    client = await Client.connect(os.getenv("TEMPORAL_ADDRESS", "localhost:7233"))
 
     workflow_id = f"plan-trip-{trip_id}"
 

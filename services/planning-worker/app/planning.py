@@ -16,6 +16,7 @@ from app.day_planning import daily_plans, day_trip_limit
 
 
 class FlightPreferences(BaseModel):
+    departure_scope: Literal["all_flights", "first_flight"] = "all_flights"
     max_stops: int = Field(default=1, ge=0, le=2)
     earliest_departure: str | None = Field(
         default=None, pattern=r"^([01]\d|2[0-3]):[0-5]\d$"
@@ -46,6 +47,7 @@ class TripOptions(BaseModel):
     return_flight_preferences: FlightPreferences | None = None
     adults: int = Field(default=1, ge=1, le=20)
     child_ages: list[int] = Field(default_factory=list, max_length=19)
+    children: int | None = Field(default=None, ge=0, le=19)
     rooms: int = Field(default=1, ge=1, le=20)
     accessibility: str = Field(default="", max_length=1000)
     budget_basis: Literal["group", "per_person"] = "group"
@@ -63,21 +65,30 @@ class TripOptions(BaseModel):
 
     @model_validator(mode="after")
     def validate_group(self):
+        if self.children is None:
+            self.children = len(self.child_ages)
         if any(age < 0 or age > 17 for age in self.child_ages):
             raise ValueError("Child ages must be between 0 and 17")
         if len({s.location.strip().casefold() for s in self.route}) != len(self.route):
             raise ValueError("List each destination once and adjust its nights")
-        if self.rooms * 4 < self.adults + len(self.child_ages):
+        if self.rooms * 4 < self.adults + self.children:
             raise ValueError(
                 "Allow at least one room per four guests; confirm actual capacity when booking"
             )
-        if self.adults + len(self.child_ages) > 20:
+        if self.adults + self.children > 20:
             raise ValueError("Voyage supports up to 20 travelers")
-        if self.rooms > self.adults + len(self.child_ages):
+        if self.rooms > self.adults + self.children:
             raise ValueError("Rooms cannot exceed the number of travelers")
         if self.endpoint == "different" and not self.end_location:
             raise ValueError("Specify the final destination")
         return self
+
+
+def scoped_flight_preferences(options, preferences, index=None):
+    result = (preferences or options.flight_preferences).model_copy()
+    if options.flight_preferences.departure_scope == "first_flight" and index != 0:
+        result.earliest_departure = None
+    return result
 
 
 def money(value):
@@ -408,11 +419,9 @@ def propose_route(trip):
     base, extra = divmod(available, len(options.route))
     for i, stop in enumerate(options.route):
         stop.nights = base + (i < extra)
-    for stop in options.route:
-        if stop.flight_preferences is None:
-            stop.flight_preferences = options.flight_preferences.model_copy()
-    if options.return_flight_preferences is None:
-        options.return_flight_preferences = options.flight_preferences.model_copy()
+    for index, stop in enumerate(options.route):
+        stop.flight_preferences = scoped_flight_preferences(options, stop.flight_preferences, index)
+    options.return_flight_preferences = scoped_flight_preferences(options, options.return_flight_preferences)
     return {
         "options": options.model_dump(mode="json"),
         "assumptions": assumptions,
@@ -470,7 +479,7 @@ def validate_route(trip):
 
 def build_plan(trip, suggestions=None):
     options = validate_route(trip)
-    people = options.adults + len(options.child_ages)
+    people = options.adults + options.children
     entered = money(trip["budget"]) if trip.get("budget") is not None else None
     multiplier = people if options.budget_basis == "per_person" else 1
     target = entered * multiplier if entered is not None else None
@@ -576,7 +585,7 @@ def build_plan(trip, suggestions=None):
                 stop.mode,
                 cursor,
                 arrival,
-                stop.flight_preferences or options.flight_preferences,
+                scoped_flight_preferences(options, stop.flight_preferences, index),
             )
         while cursor < arrival:
             days.append(
@@ -703,7 +712,7 @@ def build_plan(trip, suggestions=None):
             options.return_mode,
             cursor,
             end_date,
-            options.return_flight_preferences or options.flight_preferences,
+            scoped_flight_preferences(options, options.return_flight_preferences),
         )
     while cursor <= end_date:
         days.append(
@@ -753,6 +762,7 @@ def build_plan(trip, suggestions=None):
             dict.fromkeys(d["location"] for d in days if d.get("needs_personalization"))
         ),
         "travelers": people,
+        "party": {"adults": options.adults, "children": options.children},
         "trip_id": trip["id"],
         "data_source": "planning_estimates",
         "currency": "USD",

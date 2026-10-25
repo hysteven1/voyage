@@ -43,7 +43,7 @@ class TripCreate(BaseModel):
                 raise ValueError(
                     "Flexible budgets need a maximum at or above the target"
                 )
-            self.travelers = options.adults + len(options.child_ages)
+            self.travelers = options.adults + options.children
             self.destination = " → ".join(s.location for s in options.route)[:255]
         elif self.budget is None:
             raise ValueError("Provide trip options to plan without a budget")

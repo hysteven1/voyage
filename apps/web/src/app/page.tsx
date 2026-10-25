@@ -6,7 +6,6 @@ import Link from "next/link";
 import {
   Alert,
   Button,
-  Checkbox,
   Chip,
   CircularProgress,
   Divider,
@@ -81,6 +80,7 @@ const initial: TripForm = {
     return_flight_preferences: null,
     adults: 2,
     child_ages: [],
+    children: 0,
     rooms: 1,
     accessibility: "",
     budget_basis: "per_person",
@@ -90,7 +90,7 @@ const initial: TripForm = {
     budget_mode: "strict",
     maximum_budget: null,
     pace: "balanced",
-    lodging: "either",
+    lodging: "hotel",
     rental_car: false,
     notes: "",
   },
@@ -137,7 +137,7 @@ export default function Home() {
     form.start_date && form.end_date
       ? dayjs(form.end_date).diff(dayjs(form.start_date), "day")
       : 0;
-  const people = o.adults + o.child_ages.length;
+  const people = o.adults + o.children;
   const originInvalid =
     o.journey !== "already_there" && (form.origin?.trim().length ?? 0) < 2;
   const destinationNames = o.route.map((stop) =>
@@ -200,11 +200,11 @@ export default function Home() {
       ...o,
       endpoint: o.journey === "already_there" ? "one_way" : "return",
       end_location: null,
-      route: o.route.map((stop) => ({
+      route: o.route.map((stop, index) => ({
         ...stop,
-        flight_preferences: o.flight_preferences ?? flightDefaults,
+        flight_preferences: { ...(o.flight_preferences ?? flightDefaults), earliest_departure: index === 0 ? (o.flight_preferences?.earliest_departure ?? null) : null },
       })),
-      return_flight_preferences: o.flight_preferences ?? flightDefaults,
+      return_flight_preferences: { ...(o.flight_preferences ?? flightDefaults), earliest_departure: null },
     };
     const payload = {
       ...form,
@@ -246,12 +246,13 @@ export default function Home() {
     }
   }
 
-  function updateGroup(adults: number, child_ages: number[]) {
-    const count = adults + child_ages.length;
+  function updateGroup(adults: number, children: number) {
+    const count = adults + children;
     field("options", {
       ...o,
       adults,
-      child_ages,
+      children,
+      child_ages: [],
       rooms: Math.min(count, Math.max(Math.ceil(count / 4), o.rooms)),
     });
   }
@@ -488,24 +489,16 @@ export default function Home() {
                             detail="18 and over"
                             value={o.adults}
                             min={1}
-                            max={20 - o.child_ages.length}
-                            onChange={(n) => updateGroup(n, o.child_ages)}
+                            max={20 - o.children}
+                            onChange={(n) => updateGroup(n, o.children)}
                           />
                           <Counter
                             label="Children"
                             detail="Under 18"
-                            value={o.child_ages.length}
+                            value={o.children}
                             min={0}
                             max={20 - o.adults}
-                            onChange={(n) =>
-                              updateGroup(
-                                o.adults,
-                                Array.from(
-                                  { length: n },
-                                  (_, i) => o.child_ages[i] ?? 5,
-                                ),
-                              )
-                            }
+                            onChange={(n) => updateGroup(o.adults, n)}
                           />
                           <Counter
                             label="Rooms"
@@ -516,32 +509,6 @@ export default function Home() {
                             onChange={(n) => option("rooms", n)}
                           />
                         </div>
-                        {o.child_ages.length > 0 && (
-                          <div className="field-grid three">
-                            {o.child_ages.map((age, i) => (
-                              <TextField
-                                select
-                                label={`Child ${i + 1} age`}
-                                key={i}
-                                value={age}
-                                onChange={(e) =>
-                                  option(
-                                    "child_ages",
-                                    o.child_ages.map((a, n) =>
-                                      n === i ? +e.target.value : a,
-                                    ),
-                                  )
-                                }
-                              >
-                                {Array.from({ length: 18 }, (_, n) => (
-                                  <MenuItem value={n} key={n}>
-                                    {n === 0 ? "Under 1" : n}
-                                  </MenuItem>
-                                ))}
-                              </TextField>
-                            ))}
-                          </div>
-                        )}
                       </FormSection>
                       <FormSection
                         title="What feels right for your trip?"
@@ -698,38 +665,6 @@ export default function Home() {
                             />
                           ))}
                         </Stack>
-                      </FormSection>
-                      <FormSection title="Somewhere to land.">
-                        <TextField
-                          select
-                          label="Where do you like to stay?"
-                          value={o.lodging}
-                          onChange={(e) =>
-                            option(
-                              "lodging",
-                              e.target.value as Options["lodging"],
-                            )
-                          }
-                        >
-                          <MenuItem value="either">
-                            Open to hotels & vacation rentals
-                          </MenuItem>
-                          <MenuItem value="hotel">Hotels</MenuItem>
-                          <MenuItem value="apartment">
-                            Vacation rentals
-                          </MenuItem>
-                        </TextField>
-                        <FormControlLabel
-                          control={
-                            <Checkbox
-                              checked={o.rental_car}
-                              onChange={(e) =>
-                                option("rental_car", e.target.checked)
-                              }
-                            />
-                          }
-                          label="I’m interested in renting a car"
-                        />
                       </FormSection>
                       <FormSection title="The little details matter.">
                         <TextField
@@ -1102,31 +1037,10 @@ function FlightFields({
           />
         </RadioGroup>
       </FormControl>
-      <FormControl>
-        <FormLabel id="overnight-label">Overnight flights</FormLabel>
-        <RadioGroup
-          row
-          aria-labelledby="overnight-label"
-          value={value.allow_overnight ? "yes" : "no"}
-          onChange={(e) =>
-            onChange({ ...value, allow_overnight: e.target.value === "yes" })
-          }
-        >
-          <FormControlLabel
-            value="no"
-            control={<Radio />}
-            label="No overnight flights"
-          />
-          <FormControlLabel
-            value="yes"
-            control={<Radio />}
-            label="Overnight is okay"
-          />
-        </RadioGroup>
-      </FormControl>
       <div className="field-grid two">
         <TextField
-          label="Depart after (optional)"
+          label="Leave home after (optional)"
+          helperText="First outbound flight only—for example, after work."
           type="time"
           value={value.earliest_departure ?? ""}
           slotProps={{
@@ -1147,7 +1061,8 @@ function FlightFields({
           }
         />
         <TextField
-          label="Arrive before (optional)"
+          label="Arrive by (optional)"
+          helperText="At each flight’s destination, in local time."
           type="time"
           value={value.latest_arrival ?? ""}
           slotProps={{
@@ -1169,7 +1084,9 @@ function FlightFields({
         />
       </div>
       <Typography variant="caption" color="text.secondary">
-        Times are local to each airport. Confirm these preferences when booking.
+        Departure time only applies when leaving home. Arrival time applies to
+        each flight, including the return. Overnight flights may arrive the next
+        day.
       </Typography>
     </Stack>
   );

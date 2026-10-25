@@ -373,3 +373,35 @@ def test_long_stay_uses_small_batches_without_repeating_attractions(trip, monkey
     plan = build_plan(trip, result)
     assert not plan["incomplete_destinations"]
     assert all(d["activities"] for d in plan["days"] if d["kind"] == "full")
+
+
+def test_activity_retry_resumes_completed_batches(trip, monkeypatch):
+    from copy import deepcopy
+
+    monkeypatch.setenv("OPENAI_API_KEY", "test-only")
+    details, seen = [], []
+    monkeypatch.setattr(places.activity, "in_activity", lambda: True)
+    monkeypatch.setattr(
+        places.activity, "info", lambda: SimpleNamespace(heartbeat_details=details)
+    )
+    monkeypatch.setattr(
+        places.activity,
+        "heartbeat",
+        lambda data: details.__setitem__(slice(None), [deepcopy(data)]),
+    )
+
+    def generate(batch_trip, requests):
+        offset = len(batch_trip["already_planned"])
+        seen.append(offset)
+        if seen == [0, 3]:
+            raise ApplicationError("temporary failure")
+        city = advice().cities[0].model_dump()
+        city["days"] = city["days"][offset : offset + requests[0]["day_plan_count"]]
+        return {"Paris, France": city}
+
+    monkeypatch.setattr(places, "suggest_destination", generate)
+    with pytest.raises(ApplicationError, match="temporary failure"):
+        places.suggest_places(trip)
+    result = places.suggest_places(trip)
+    assert seen == [0, 3, 3, 6]
+    assert len(result["Paris, France"]["days"]) == 7

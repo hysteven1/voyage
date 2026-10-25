@@ -10,7 +10,7 @@ from copy import deepcopy
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from functools import lru_cache
-from urllib.parse import parse_qs, quote, urlencode, urlparse
+from urllib.parse import parse_qs, urlencode, urlparse
 from urllib.request import urlopen
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -18,6 +18,7 @@ import airportsdata
 from temporalio import activity
 from temporalio.exceptions import ApplicationError
 
+from app.booking_links import child_count, hotel_room_options, stay_search_links
 from app.planning import build_plan, money
 
 logger = logging.getLogger("voyage.activities")
@@ -181,13 +182,15 @@ class SerpApi:
 
     def flight(self, leg, options):
         prefs = leg.get("restrictions") or options.get("flight_preferences", {})
+        unknown_child_rates = child_count(options) > 0 and not options.get("child_ages")
         params = {
             "engine": "google_flights",
             "departure_id": self.city_id(leg["origin"]),
             "arrival_id": self.city_id(leg["destination"]),
             "outbound_date": leg["departure_date"],
             "type": 2,
-            "adults": options["adults"],
+            "adults": options["adults"]
+            + (child_count(options) if unknown_child_rates else 0),
             "children": sum(age >= 2 for age in options["child_ages"]),
             "infants_in_seat": sum(age < 2 for age in options["child_ages"]),
             "stops": int(prefs.get("max_stops", 1)) + 1,
@@ -336,7 +339,12 @@ class SerpApi:
                 "stops": len(segments) - 1,
                 "duration_minutes": selected.get("total_duration"),
                 "price": str(money(selected["price"])),
-                "price_basis": "requested_party",
+                "price_basis": "adult_fare_estimate"
+                if unknown_child_rates
+                else "requested_party",
+                "price_note": "Uses adult fares for all travelers; child fares may differ when booking."
+                if unknown_child_rates
+                else "",
                 "google_flights_url": selected_url,
                 "checked_at": datetime.now(UTC).isoformat(),
                 "source": "SerpApi / Google Flights",
@@ -344,25 +352,31 @@ class SerpApi:
         }
 
     def stay(self, stay, options):
+        search_options = (
+            hotel_room_options(options)
+            if options["lodging"] != "apartment"
+            else options
+        )
         params = {
             "engine": "google_hotels",
-            "q": f"{stay['area']} {stay['location']}",
+            # AI area descriptions contain prose, not search terms. Keep the
+            # location query stable regardless of the number of destinations.
+            "q": f"{stay['location']} hotels"
+            if options["lodging"] != "apartment"
+            else f"{stay['location']} vacation rentals",
             "check_in_date": stay["check_in"],
             "check_out_date": stay["check_out"],
-            "adults": options["adults"],
-            "children": len(options["child_ages"]),
+            "adults": search_options["adults"],
+            "children": len(search_options["child_ages"]),
             "rating": 8,
         }
-        if options["child_ages"]:
+        if search_options["child_ages"]:
             params["children_ages"] = ",".join(
-                str(max(1, age)) for age in options["child_ages"]
+                str(max(1, age)) for age in search_options["child_ages"]
             )
         if options["lodging"] == "apartment":
             params.update(vacation_rentals="true", bedrooms=options["rooms"])
         result = self.query(**params)
-        alternatives = safe_link(
-            result.get("search_metadata", {}).get("google_hotels_url"), "hotels"
-        )
         candidates = []
         for prop in result.get("properties", []):
             price = amount(prop.get("total_rate"))
@@ -392,31 +406,7 @@ class SerpApi:
                 prop["overall_rating"] ** 2 * max(1, prop.get("location_rating", 4))
             )
             candidates.append((score, prop))
-        airbnb = (
-            "https://www.airbnb.com/s/"
-            + quote(stay["location"], safe="")
-            + "/homes?"
-            + urlencode(
-                {
-                    "checkin": stay["check_in"],
-                    "checkout": stay["check_out"],
-                    "adults": options["adults"],
-                    "children": sum(age >= 2 for age in options["child_ages"]),
-                    "infants": sum(age < 2 for age in options["child_ages"]),
-                    "min_bedrooms": options["rooms"],
-                }
-            )
-        )
-        updates = {
-            "alternatives_url": alternatives
-            or "https://www.google.com/travel/hotels?"
-            + urlencode(
-                {
-                    "q": f"{stay['location']} hotels {stay['check_in']} to {stay['check_out']} {options['adults']} adults {len(options['child_ages'])} children 4+ guest rating"
-                }
-            ),
-            "rental_alternatives_url": airbnb,
-        }
+        updates = stay_search_links(stay, options)
         if not candidates:
             return {**updates, "selection_status": "no_matching_offer"}
         _, selected = min(candidates, key=lambda item: item[0])
@@ -455,8 +445,13 @@ class SerpApi:
                     or amount(selected["total_rate"])
                 ),
                 "booking_url": booking_url,
-                "price_basis": "provider_search_stay",
-                "capacity_note": "Confirm room quantity, guest capacity, accessibility and final fees before booking.",
+                "rooms_requested": options["rooms"],
+                "quoted_guests": search_options["adults"]
+                + len(search_options["child_ages"]),
+                "price_basis": "per_room_stay"
+                if options["lodging"] != "apartment"
+                else "provider_search_stay",
+                "capacity_note": f"Plan for {options['rooms']} room(s) at this property. Confirm that all rooms are available for your dates, and check guest capacity, child rates and final fees with the hotel before booking.",
                 "checked_at": datetime.now(UTC).isoformat(),
                 "source": "SerpApi / Google Hotels",
             },
@@ -510,6 +505,8 @@ def refresh_estimates(plan):
 @activity.defn
 def select_travel_options(data):
     plan, trip = deepcopy(data["plan"]), data["trip"]
+    for stay in plan["stays"]:
+        stay.update(stay_search_links(stay, trip["options"]))
     provider = SerpApi()
     if not provider.key:
         plan["booking_source"] = "not_configured"
@@ -540,9 +537,11 @@ def select_travel_options(data):
                 else provider.stay(item, trip["options"])
             )
             return kind, index, update
-        except Exception:  # noqa: BLE001 - provider failures must not leak credential-bearing URLs.
+        except Exception as exc:  # noqa: BLE001 - provider failures must not leak credential-bearing URLs.
             logger.warning(
-                "Travel search unavailable for one leg or stay",
+                "Travel search unavailable for %s (%s)",
+                kind,
+                type(exc).__name__,
                 extra={"trip_id": trip["id"]},
             )
             return kind, index, {"selection_status": "unavailable"}
@@ -589,16 +588,20 @@ def select_travel_options(data):
                     leg["arrival_date"] = str(
                         datetime.fromisoformat(selected["arrival_time"]).date()
                     )
+        for stay in plan["stays"]:
+            stay.update(stay_search_links(stay, trip["options"]))
         stays = [("stay", i, stay) for i, stay in enumerate(plan["stays"])]
         for _, index, update in executor.map(select, stays):
             plan["stays"][index].update(update)
-            if update.get("selected_stay") and (
-                trip["options"]["rooms"] == 1
-                or trip["options"]["lodging"] == "apartment"
-            ):
-                plan["stays"][index]["estimated_cost"] = update["selected_stay"][
-                    "quoted_total"
-                ]
+            if update.get("selected_stay"):
+                rooms = (
+                    1
+                    if trip["options"]["lodging"] == "apartment"
+                    else trip["options"]["rooms"]
+                )
+                total = str(money(update["selected_stay"]["quoted_total"]) * rooms)
+                update["selected_stay"]["estimated_group_total"] = total
+                plan["stays"][index]["estimated_cost"] = total
     if any(leg.get("selected_flight") for leg in plan["legs"]) or any(
         stay.get("selected_stay") for stay in plan["stays"]
     ):

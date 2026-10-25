@@ -3,7 +3,9 @@
 import json
 import logging
 import os
-from concurrent.futures import ThreadPoolExecutor
+import threading
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
+from copy import deepcopy
 from datetime import date, timedelta
 from time import monotonic
 
@@ -382,6 +384,20 @@ def suggest_places(trip: dict) -> dict:
             "Activity planning is not configured. Set OPENAI_API_KEY on the worker.",
             non_retryable=True,
         )
+    in_activity = activity.in_activity()
+    details = activity.info().heartbeat_details if in_activity else []
+    saved = (
+        deepcopy(details[0].get("cities", {}))
+        if details and isinstance(details[0], dict)
+        else {}
+    )
+    saved_lock = threading.Lock()
+
+    def checkpoint():
+        if in_activity:
+            with saved_lock:
+                activity.heartbeat({"cities": deepcopy(saved)})
+
     cursor = date.fromisoformat(str(trip["start_date"]))
     requests = []
     for index, stop in enumerate(trip["options"]["route"]):
@@ -402,7 +418,12 @@ def suggest_places(trip: dict) -> dict:
 
     def generate(request):
         location = request["location"]
-        combined = {"location": location, "days": [], "highlights": [], "day_trips": []}
+        combined = deepcopy(saved.get(location)) or {
+            "location": location,
+            "days": [],
+            "highlights": [],
+            "day_trips": [],
+        }
         while len(combined["days"]) < request["day_plan_count"]:
             remaining = request["day_plan_count"] - len(combined["days"])
             excursions = sum(bool(day.get("day_trip")) for day in combined["days"])
@@ -449,7 +470,22 @@ def suggest_places(trip: dict) -> dict:
             if not combined["day_trips"]:
                 combined["day_trips"] = result.get("day_trips", [])
             combined["quality_notes"] = result.get("quality_notes", [])
+            with saved_lock:
+                saved[location] = deepcopy(combined)
         return location, combined
 
     with ThreadPoolExecutor(max_workers=min(4, len(requests))) as executor:
-        return dict(executor.map(generate, requests))
+        pending = {executor.submit(generate, request) for request in requests}
+        results, failures = {}, []
+        while pending:
+            done, pending = wait(pending, timeout=2, return_when=FIRST_COMPLETED)
+            for future in done:
+                try:
+                    location, result = future.result()
+                    results[location] = result
+                except Exception as exc:  # noqa: BLE001 - checkpoint successful cities before allowing Temporal to retry.
+                    failures.append(exc)
+            checkpoint()
+        if failures:
+            raise failures[0]
+        return results

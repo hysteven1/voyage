@@ -24,6 +24,17 @@ with workflow.unsafe.imports_passed_through():
 
 @workflow.defn
 class PlanTripWorkflow:
+    def __init__(self):
+        self.progress = {
+            "stage": "starting",
+            "label": "Getting your trip ready",
+            "percent": 5,
+        }
+
+    @workflow.query
+    def planning_progress(self) -> dict:
+        return self.progress
+
     @workflow.run
     async def run(self, trip_id: str) -> dict:
         retry_policy = RetryPolicy(
@@ -50,6 +61,11 @@ class PlanTripWorkflow:
             )
 
             if trip.get("options"):
+                self.progress = {
+                    "stage": "activities",
+                    "label": "Building your day-by-day itinerary",
+                    "percent": 20,
+                }
                 suggestions = await execute(
                     suggest_places,
                     trip,
@@ -85,6 +101,11 @@ class PlanTripWorkflow:
                 )
 
             if trip.get("options") and workflow.patched("live-travel-selection-v1"):
+                self.progress = {
+                    "stage": "travel",
+                    "label": "Finding flights and places to stay",
+                    "percent": 75,
+                }
                 plan = await execute(
                     select_travel_options,
                     {"trip": trip, "plan": plan, "suggestions": suggestions},
@@ -94,6 +115,11 @@ class PlanTripWorkflow:
             # Personalization is optional enrichment.
             # A failure must not invalidate the budget-safe plan.
             try:
+                self.progress = {
+                    "stage": "finishing",
+                    "label": "Putting the finishing touches on your trip",
+                    "percent": 90,
+                }
                 narrative = await execute(
                     personalize_itinerary,
                     {"trip": trip, "plan": plan},
@@ -115,10 +141,20 @@ class PlanTripWorkflow:
                 complete_trip,
                 {"trip_id": trip_id, "plan": enriched_plan},
             )
+            self.progress = {
+                "stage": "completed",
+                "label": "Your itinerary is ready",
+                "percent": 100,
+            }
 
             return enriched_plan
 
         except Exception as exc:
+            self.progress = {
+                "stage": "failed",
+                "label": "Planning needs another attempt",
+                "percent": 0,
+            }
             cause = exc
             while getattr(cause, "cause", None) is not None:
                 cause = cause.cause

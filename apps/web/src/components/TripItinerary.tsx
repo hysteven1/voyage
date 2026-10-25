@@ -5,6 +5,7 @@ import {
   Alert,
   Button,
   CircularProgress,
+  LinearProgress,
   Paper,
   Stack,
   Typography,
@@ -48,21 +49,35 @@ export default function TripItinerary({
   const [plan, setPlan] = useState<LegacyPlan | ExpandedPlan | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [progress, setProgress] = useState<{
+    label: string;
+    percent: number | null;
+  }>({ label: "Getting your trip ready", percent: null });
+  const [elapsed, setElapsed] = useState(0);
   const generation = useRef(0);
   const startPlanning = useCallback(async () => {
     const run = ++generation.current;
     setLoading(true);
     setError("");
+    setProgress({ label: "Getting your trip ready", percent: null });
+    setElapsed(0);
     try {
       await api(`/api/v1/trips/${tripId}/plan`, {});
       if (generation.current !== run) return;
       setStatus("planning");
-      for (let attempt = 0; attempt < 180; attempt++) {
+      for (let attempt = 0; attempt < 600; attempt++) {
         const trip = await api<{ status: string; planning_error?: string }>(
           `/api/v1/trips/${tripId}`,
         );
         if (generation.current !== run) return;
         setStatus(trip.status);
+        if (trip.status === "planning" && attempt % 2 === 0) {
+          const update = await api<{ label: string; percent: number | null }>(
+            `/api/v1/trips/${tripId}/progress`,
+          ).catch(() => null);
+          if (generation.current !== run) return;
+          if (update?.label) setProgress(update);
+        }
         if (trip.status === "completed") {
           const result = await api<LegacyPlan | ExpandedPlan>(
             `/api/v1/trips/${tripId}/itinerary`,
@@ -89,6 +104,12 @@ export default function TripItinerary({
       if (generation.current === run) setLoading(false);
     }
   }, [tripId]);
+
+  useEffect(() => {
+    if (!loading) return;
+    const timer = setInterval(() => setElapsed((seconds) => seconds + 1), 1000);
+    return () => clearInterval(timer);
+  }, [loading]);
 
   useEffect(() => {
     let active = true;
@@ -183,6 +204,31 @@ export default function TripItinerary({
             ? "We’re putting together your route, stays, and daily ideas. This can take a few minutes."
             : "We’ll turn your route into a thoughtful day-by-day itinerary, with estimated costs and searches to help you book."}
         </Typography>
+        {loading && (
+          <Stack
+            spacing={1.5}
+            sx={{ width: "100%" }}
+            role="status"
+            aria-live="polite"
+          >
+            <Typography variant="body2" sx={{ fontWeight: 600 }}>
+              {progress.label}
+            </Typography>
+            <LinearProgress
+              aria-label="Trip planning progress"
+              variant={
+                progress.percent == null ? "indeterminate" : "determinate"
+              }
+              value={progress.percent ?? undefined}
+              sx={{ height: 8, borderRadius: 4 }}
+            />
+            <Typography variant="caption" color="text.secondary">
+              {Math.floor(elapsed / 60)}:{String(elapsed % 60).padStart(2, "0")}{" "}
+              elapsed · Longer trips can take a few minutes. You can keep this
+              page open while we plan.
+            </Typography>
+          </Stack>
+        )}
         <Button
           variant="contained"
           disabled={loading}

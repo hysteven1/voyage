@@ -20,6 +20,7 @@ from app.logging_config import configure_logging
 from app.models import Itinerary, Trip
 from app.planning import build_plan, propose_route, validate_route
 from app.schemas import TripCreate, TripResponse
+from app.temporal_config import connection_options
 
 app = FastAPI(
     title="Voyage Trip Service",
@@ -205,7 +206,9 @@ async def trip_planning_progress(trip_id: uuid.UUID):
         }
 
     async def query_progress():
-        client = await Client.connect(os.getenv("TEMPORAL_ADDRESS", "localhost:7233"))
+        client = await Client.connect(
+            os.getenv("TEMPORAL_ADDRESS", "localhost:7233"), **connection_options()
+        )
         return await client.get_workflow_handle(f"plan-trip-{trip_id}").query(
             "planning_progress"
         )
@@ -223,6 +226,7 @@ async def trip_planning_progress(trip_id: uuid.UUID):
 @app.post("/api/v1/trips/{trip_id}/plan")
 async def start_trip_planning(
     trip_id: uuid.UUID,
+    request: Request,
 ):
     # This sync helper is intentionally called in a thread
     # so we don't block FastAPI's event loop.
@@ -263,7 +267,9 @@ async def start_trip_planning(
             detail="Trip planning already completed",
         )
 
-    client = await Client.connect(os.getenv("TEMPORAL_ADDRESS", "localhost:7233"))
+    client = await Client.connect(
+        os.getenv("TEMPORAL_ADDRESS", "localhost:7233"), **connection_options()
+    )
 
     workflow_id = f"plan-trip-{trip_id}"
 
@@ -282,6 +288,13 @@ async def start_trip_planning(
             detail="Trip planning workflow already completed",
         ) from None
 
+    logger.info(
+        "Trip planning requested",
+        extra={
+            "trip_id": str(trip_id), "workflow_id": workflow_id,
+            "request_id": getattr(request.state, "request_id", None),
+        },
+    )
     return {
         "trip_id": str(trip_id),
         "workflow_id": workflow_id,

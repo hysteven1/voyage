@@ -1,0 +1,65 @@
+# External dependencies and Secret must exist before installation.
+# Never commit credentials here. All application images must share a source revision.
+fullnameOverride: ""
+imagePullSecrets: []
+images:
+  api:
+    repository: ghcr.io/hysteven1/voyage-api
+    tag: "" # sha-<full commit>; required unless digest is set
+    digest: "" # sha256:...; takes precedence over tag
+  worker:
+    repository: ghcr.io/hysteven1/voyage-worker
+    tag: ""
+    digest: ""
+  web:
+    repository: ghcr.io/hysteven1/voyage-web
+    tag: ""
+    digest: ""
+imagePullPolicy: IfNotPresent
+# Required keys: DATABASE_URL. Optional OPENAI_API_KEY, SERPAPI_API_KEY,
+# TEMPORAL_API_KEY. Provision out of band, never through Helm release values.
+existingSecret: voyage-runtime
+config:
+  temporalAddress: temporal:7233
+  temporalNamespace: default
+  temporalTls: "false"
+  openaiModel: gpt-4o-mini
+  openaiPlanningModel: gpt-6.1-sol
+  openaiRecoveryModel: gpt-4o-mini
+replicas:
+  api: 1
+  worker: 1
+  web: 1
+resources:
+  api:
+    requests: {cpu: 100m, memory: 128Mi}
+    limits: {cpu: "1", memory: 512Mi}
+  worker:
+    requests: {cpu: 250m, memory: 256Mi}
+    limits: {cpu: "2", memory: 1Gi}
+  web:
+    requests: {cpu: 100m, memory: 128Mi}
+    limits: {cpu: "1", memory: 512Mi}
+worker:
+  maxConcurrentActivities: 4
+  # Long provider requests cannot always be interrupted immediately.
+  terminationGracePeriodSeconds: 240
+migrations:
+  enabled: true
+  activeDeadlineSeconds: 300
+  resources:
+    requests: {cpu: 100m, memory: 128Mi}
+    limits: {cpu: "1", memory: 512Mi}
+ingress:
+  enabled: false
+  className: ""
+  host: voyage.local
+  annotations: {}
+  tls: [] # e.g. [{secretName: voyage-tls, hosts: [voyage.example.com]}]
+# Opt-in: requires a CNI enforcing NetworkPolicy (kind's default does not).
+# Egress permits DNS, TLS APIs and configurable database/Temporal ports.
+networkPolicy:
+  enabled: false
+  ingressNamespace: ingress-nginx
+  databasePort: 5432
+  temporalPort: 7233

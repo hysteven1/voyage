@@ -1,0 +1,6 @@
+Voyage installed. Dependencies and Secret are managed separately.
+Access without public ingress:
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "voyage.name" . }}-web 3000:3000
+Inspect migrations before retrying a failed install:
+  kubectl -n {{ .Release.Namespace }} logs job/{{ include "voyage.name" . }}-migrate
+Never delete database or Temporal PVCs to fix a rollout.

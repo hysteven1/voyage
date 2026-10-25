@@ -1,0 +1,19 @@
+{{- $root := . -}}
+{{- range $component := list "api" "web" }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "voyage.name" $root }}-{{ $component }}
+  labels:
+    {{- include "voyage.labels" $root | nindent 4 }}
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: {{ ternary 3000 8000 (eq $component "web") }}
+      targetPort: http
+  selector:
+    app.kubernetes.io/instance: {{ $root.Release.Name }}
+    app.kubernetes.io/component: {{ $component }}
+{{- end }}

@@ -1,0 +1,9 @@
+# Supply actual immutable image digests, external endpoints and ingress details
+# in a reviewed, nonsecret environment values file before deploying.
+imagePullPolicy: Always
+config:
+  temporalAddress: "" # required: externally provisioned production service
+  temporalNamespace: "" # required: provisioned namespace
+  temporalTls: "true"
+ingress:
+  enabled: false # enable only after TLS + access protection are configured

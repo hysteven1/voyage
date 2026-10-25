@@ -56,7 +56,7 @@ services:
   migrate:
     build:
       context: ./services/trip-service
-    command: ["alembic", "upgrade", "head"]
+    command: ["python", "-m", "app.migrate"]
     environment:
       DATABASE_URL: postgresql+psycopg://voyage:${POSTGRES_PASSWORD:-voyage_local_dev}@postgres:5432/voyage
     depends_on:
@@ -73,6 +73,7 @@ services:
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}
       OPENAI_PLANNING_MODEL: ${OPENAI_PLANNING_MODEL:-gpt-6.1-sol}
+      OPENAI_RECOVERY_MODEL: ${OPENAI_RECOVERY_MODEL:-gpt-4o-mini}
       DATABASE_URL: postgresql+psycopg://voyage:${POSTGRES_PASSWORD:-voyage_local_dev}@postgres:5432/voyage
       TEMPORAL_ADDRESS: temporal:7233
     ports:
@@ -105,6 +106,7 @@ services:
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}
       OPENAI_PLANNING_MODEL: ${OPENAI_PLANNING_MODEL:-gpt-6.1-sol}
+      OPENAI_RECOVERY_MODEL: ${OPENAI_RECOVERY_MODEL:-gpt-4o-mini}
     depends_on:
       migrate:
         condition: service_completed_successfully

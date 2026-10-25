@@ -1,0 +1,9 @@
+# Dedicated kind cluster; build and load these names before installing.
+images:
+  api: {repository: voyage-api, tag: local}
+  worker: {repository: voyage-worker, tag: local}
+  web: {repository: voyage-web, tag: local}
+imagePullPolicy: Never
+existingSecret: voyage-runtime
+config:
+  temporalAddress: temporal:7233

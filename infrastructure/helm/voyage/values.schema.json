@@ -1,0 +1,123 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "images": {
+      "type": "object",
+      "required": [
+        "api",
+        "worker",
+        "web"
+      ],
+      "properties": {
+        "api": {
+          "type": "object",
+          "required": [
+            "repository"
+          ],
+          "properties": {
+            "repository": {
+              "type": "string",
+              "minLength": 1
+            },
+            "tag": {
+              "type": "string",
+              "pattern": "^(local|sha-[a-f0-9]{40}|[0-9]+\\.[0-9]+\\.[0-9]+)?$"
+            },
+            "digest": {
+              "type": "string",
+              "pattern": "^(sha256:[a-f0-9]{64})?$"
+            }
+          }
+        },
+        "worker": {
+          "type": "object",
+          "required": [
+            "repository"
+          ],
+          "properties": {
+            "repository": {
+              "type": "string",
+              "minLength": 1
+            },
+            "tag": {
+              "type": "string",
+              "pattern": "^(local|sha-[a-f0-9]{40}|[0-9]+\\.[0-9]+\\.[0-9]+)?$"
+            },
+            "digest": {
+              "type": "string",
+              "pattern": "^(sha256:[a-f0-9]{64})?$"
+            }
+          }
+        },
+        "web": {
+          "type": "object",
+          "required": [
+            "repository"
+          ],
+          "properties": {
+            "repository": {
+              "type": "string",
+              "minLength": 1
+            },
+            "tag": {
+              "type": "string",
+              "pattern": "^(local|sha-[a-f0-9]{40}|[0-9]+\\.[0-9]+\\.[0-9]+)?$"
+            },
+            "digest": {
+              "type": "string",
+              "pattern": "^(sha256:[a-f0-9]{64})?$"
+            }
+          }
+        }
+      }
+    },
+    "replicas": {
+      "type": "object",
+      "properties": {
+        "api": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "worker": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "web": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "existingSecret": {
+      "type": "string",
+      "minLength": 1
+    },
+    "worker": {
+      "type": "object",
+      "properties": {
+        "maxConcurrentActivities": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10
+        },
+        "terminationGracePeriodSeconds": {
+          "type": "integer",
+          "minimum": 120
+        }
+      }
+    },
+    "config": {
+      "type": "object",
+      "properties": {
+        "temporalTls": {
+          "type": "string",
+          "enum": [
+            "true",
+            "false"
+          ]
+        }
+      }
+    }
+  }
+}

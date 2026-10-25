@@ -1,0 +1,29 @@
+name: Integration smoke
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  kind:
+    name: Local Kubernetes synthetic planning
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      KUBECONFIG: /tmp/voyage-infra.kubeconfig
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - run: scripts/install-infra-tools.sh "$RUNNER_TEMP/voyage-tools"
+      - run: echo "$RUNNER_TEMP/voyage-tools" >> "$GITHUB_PATH"
+      - run: scripts/kind-smoke.sh
+      - name: Inspect failed local deployment
+        if: failure()
+        run: |
+          kubectl --context kind-voyage-infra -n voyage-dev get pods,events || true
+          kubectl --context kind-voyage-infra -n voyage-dev logs deployment/voyage-voyage-api --tail=100 || true
+          kubectl --context kind-voyage-infra -n voyage-dev logs deployment/voyage-voyage-worker --tail=100 || true
+          kubectl --context kind-voyage-infra -n voyage-dev logs job/voyage-voyage-migrate || true
+      - name: Remove only the disposable CI cluster
+        if: always()
+        run: kind delete cluster --name voyage-infra

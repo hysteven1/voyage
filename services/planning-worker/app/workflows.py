@@ -50,6 +50,7 @@ class PlanTripWorkflow:
                 arg,
                 start_to_close_timeout=timedelta(seconds=timeout),
                 retry_policy=retry_policy,
+                heartbeat_timeout=timedelta(seconds=30) if fn == suggest_places else None,
             )
 
         try:

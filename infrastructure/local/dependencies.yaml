@@ -1,0 +1,133 @@
+# Development only. Apply into voyage-dev after creating Secrets.
+# These PVCs do not reference existing Docker Compose data.
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+spec:
+  selector: {app: voyage-local-postgres}
+  ports: [{name: postgres, port: 5432, targetPort: 5432}]
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres
+spec:
+  serviceName: postgres
+  replicas: 1
+  selector:
+    matchLabels: {app: voyage-local-postgres}
+  template:
+    metadata:
+      labels: {app: voyage-local-postgres}
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsUser: 999
+        runAsGroup: 999
+        runAsNonRoot: true
+        fsGroup: 999
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: postgres
+          image: postgres:17@sha256:b8faeff7712663c2773a190181e1246e37e364b887611c04658c28b44e2408fe
+          env:
+            - {name: POSTGRES_USER, value: voyage}
+            - {name: POSTGRES_DB, value: voyage}
+            - {name: PGDATA, value: /var/lib/postgresql/data/pgdata}
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef: {name: voyage-postgres, key: POSTGRES_PASSWORD}
+          ports: [{containerPort: 5432, name: postgres}]
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: {drop: [ALL]}
+          resources:
+            requests: {cpu: 100m, memory: 128Mi}
+            limits: {cpu: '1', memory: 512Mi}
+          startupProbe:
+            exec: {command: [pg_isready, -U, voyage, -d, voyage]}
+            periodSeconds: 5
+            failureThreshold: 60
+          readinessProbe:
+            exec: {command: [pg_isready, -U, voyage, -d, voyage]}
+            periodSeconds: 5
+          livenessProbe:
+            exec: {command: [pg_isready, -U, voyage, -d, voyage]}
+            periodSeconds: 15
+          volumeMounts:
+            - {name: data, mountPath: /var/lib/postgresql/data}
+  volumeClaimTemplates:
+    - metadata: {name: data}
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources:
+          requests: {storage: 2Gi}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: temporal
+spec:
+  selector: {app: voyage-local-temporal}
+  ports:
+    - {name: grpc, port: 7233, targetPort: 7233}
+    - {name: ui, port: 8233, targetPort: 8233}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: temporal
+spec:
+  serviceName: temporal
+  replicas: 1
+  selector:
+    matchLabels: {app: voyage-local-temporal}
+  template:
+    metadata:
+      labels: {app: voyage-local-temporal}
+    spec:
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsUser: 10001
+        runAsGroup: 10001
+        runAsNonRoot: true
+        fsGroup: 10001
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: temporal
+          image: temporalio/temporal@sha256:ad4c82c97bd12b417d1ea942610dbcd511afb250c4d5ed26c694009533df447e
+          command: [temporal]
+          args: [server, start-dev, --ip, 0.0.0.0, --ui-ip, 0.0.0.0, --db-filename, /data/temporal.db]
+          env:
+            # Go's pure-Go user lookup needs this for the numeric non-root UID.
+            - {name: USER, value: voyage}
+          ports:
+            - {name: grpc, containerPort: 7233}
+            - {name: ui, containerPort: 8233}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: {drop: [ALL]}
+          resources:
+            requests: {cpu: 250m, memory: 256Mi}
+            limits: {cpu: '2', memory: 1Gi}
+          startupProbe:
+            tcpSocket: {port: grpc}
+            periodSeconds: 5
+            failureThreshold: 60
+          readinessProbe:
+            exec: {command: [temporal, operator, namespace, describe, --namespace, default, --address, localhost:7233]}
+            periodSeconds: 10
+            timeoutSeconds: 5
+          livenessProbe:
+            tcpSocket: {port: grpc}
+            periodSeconds: 15
+          volumeMounts:
+            - {name: data, mountPath: /data}
+  volumeClaimTemplates:
+    - metadata: {name: data}
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources:
+          requests: {storage: 2Gi}

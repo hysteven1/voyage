@@ -1,0 +1,101 @@
+{{- $root := . -}}
+{{- range $component := list "api" "worker" "web" }}
+{{- $port := ternary 3000 (ternary 8000 8081 (eq $component "api")) (eq $component "web") }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "voyage.name" $root }}-{{ $component }}
+  labels:
+    {{- include "voyage.labels" $root | nindent 4 }}
+    app.kubernetes.io/component: {{ $component }}
+spec:
+  replicas: {{ index $root.Values.replicas $component }}
+  revisionHistoryLimit: 3
+  progressDeadlineSeconds: 600
+  strategy:
+    type: {{ ternary "Recreate" "RollingUpdate" (eq $component "worker") }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: {{ $root.Release.Name }}
+      app.kubernetes.io/component: {{ $component }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: voyage
+        app.kubernetes.io/instance: {{ $root.Release.Name }}
+        app.kubernetes.io/component: {{ $component }}
+      annotations:
+        checksum/config: {{ include (print $root.Template.BasePath "/configmap.yaml") $root | sha256sum }}
+    spec:
+      serviceAccountName: {{ include "voyage.name" $root }}
+      automountServiceAccountToken: false
+      {{- with $root.Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      terminationGracePeriodSeconds: {{ ternary $root.Values.worker.terminationGracePeriodSeconds 30 (eq $component "worker") }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: {{ $component }}
+          image: {{ include "voyage.image" (index $root.Values.images $component) | quote }}
+          imagePullPolicy: {{ $root.Values.imagePullPolicy }}
+          ports:
+            - {name: http, containerPort: {{ $port }}}
+          securityContext:
+            {{- include "voyage.security" $root | nindent 12 }}
+          env:
+            - name: SERVICE_NAME
+              value: {{ $component | quote }}
+            {{- if eq $component "web" }}
+            - name: API_INTERNAL_URL
+              value: http://{{ include "voyage.name" $root }}-api:8000
+            {{- end }}
+          {{- if ne $component "web" }}
+          envFrom:
+            - configMapRef:
+                name: {{ include "voyage.name" $root }}
+            - secretRef:
+                name: {{ $root.Values.existingSecret }}
+          {{- end }}
+          resources:
+            {{- toYaml (index $root.Values.resources $component) | nindent 12 }}
+          startupProbe:
+            httpGet:
+              path: {{ ternary "/api/health" (ternary "/api/v1/health/live" "/health/live" (eq $component "api")) (eq $component "web") }}
+              port: http
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 60
+          livenessProbe:
+            httpGet:
+              path: {{ ternary "/api/health" (ternary "/api/v1/health/live" "/health/live" (eq $component "api")) (eq $component "web") }}
+              port: http
+            periodSeconds: 15
+            timeoutSeconds: 3
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: {{ ternary "/api/health" (ternary "/api/v1/health/ready" "/health/ready" (eq $component "api")) (eq $component "web") }}
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          volumeMounts:
+            - {name: tmp, mountPath: /tmp}
+            {{- if eq $component "web" }}
+            - {name: next-cache, mountPath: /app/.next/cache}
+            {{- end }}
+      volumes:
+        - name: tmp
+          emptyDir: {sizeLimit: 128Mi}
+        {{- if eq $component "web" }}
+        - name: next-cache
+          emptyDir: {sizeLimit: 256Mi}
+        {{- end }}
+{{- end }}

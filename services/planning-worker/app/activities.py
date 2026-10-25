@@ -18,11 +18,14 @@ logger = logging.getLogger("voyage.activities")
 
 @contextmanager
 def log_activity(trip_id, message):
-    logger.info(message, extra={"trip_id": trip_id})
+    fields = {"trip_id": trip_id}
+    if activity.in_activity():
+        fields["workflow_id"] = activity.info().workflow_id
+    logger.info(message, extra=fields)
     try:
         yield
     except Exception:
-        logger.exception("Trip planning activity failed", extra={"trip_id": trip_id})
+        logger.exception("Trip planning activity failed", extra=fields)
         raise
 
 

@@ -15,6 +15,7 @@ from app.activities import (
     update_trip_status,
 )
 from app.ai import generate_fallback_narrative, personalize_itinerary
+from app.booking import select_travel_options
 from app.logging_config import configure_logging
 from app.places import suggest_places
 from app.providers import (
@@ -54,6 +55,7 @@ async def main():
                 save_itinerary,
                 complete_trip,
                 suggest_places,
+                select_travel_options,
             ],
             activity_executor=executor,
         )

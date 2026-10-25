@@ -38,6 +38,8 @@ const theme = createTheme({
         root: {
           backgroundColor: "#fff",
           borderRadius: 12,
+          minHeight: 56,
+          "&.Mui-focused": { boxShadow: "none" },
           "& fieldset": { borderColor: "#dce3db" },
         },
       },

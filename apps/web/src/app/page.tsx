@@ -4,9 +4,6 @@ import { FormEvent, ReactNode, useRef, useState } from "react";
 import dayjs from "dayjs";
 import Link from "next/link";
 import {
-  Accordion,
-  AccordionDetails,
-  AccordionSummary,
   Alert,
   Button,
   Checkbox,
@@ -14,6 +11,10 @@ import {
   CircularProgress,
   Divider,
   FormControlLabel,
+  FormControl,
+  FormLabel,
+  Radio,
+  RadioGroup,
   IconButton,
   MenuItem,
   Paper,
@@ -32,14 +33,10 @@ import AddRounded from "@mui/icons-material/AddRounded";
 import ArrowForwardRounded from "@mui/icons-material/ArrowForwardRounded";
 import ArrowBackRounded from "@mui/icons-material/ArrowBackRounded";
 import DeleteOutlineRounded from "@mui/icons-material/DeleteOutlineRounded";
-import ExpandMoreRounded from "@mui/icons-material/ExpandMoreRounded";
-import NorthRounded from "@mui/icons-material/NorthRounded";
-import SouthRounded from "@mui/icons-material/SouthRounded";
 import CheckRounded from "@mui/icons-material/CheckRounded";
 import HotelRounded from "@mui/icons-material/HotelRounded";
 import SpaRounded from "@mui/icons-material/SpaRounded";
 import ParkRounded from "@mui/icons-material/ParkRounded";
-import RestaurantRounded from "@mui/icons-material/RestaurantRounded";
 import MuseumRounded from "@mui/icons-material/MuseumRounded";
 import HikingRounded from "@mui/icons-material/HikingRounded";
 import TripItinerary from "@/components/TripItinerary";
@@ -57,18 +54,16 @@ import {
 } from "@/lib/trip";
 
 const interests = [
-  { name: "Food", icon: <RestaurantRounded /> },
   { name: "Nature", icon: <ParkRounded /> },
   { name: "Culture", icon: <MuseumRounded /> },
   { name: "Adventure", icon: <HikingRounded /> },
-  { name: "Relaxation", icon: <SpaRounded /> },
 ];
 const initial: TripForm = {
   origin: "",
   start_date: "",
   end_date: "",
   travelers: 2,
-  budget: 3000,
+  budget: null,
   preferences: [],
   options: {
     journey: "flying",
@@ -82,6 +77,10 @@ const initial: TripForm = {
     child_ages: [],
     rooms: 1,
     accessibility: "",
+    budget_basis: "per_person",
+    spending_style: "value",
+    budget_enforcement: "target",
+    flight_preferences: flightDefaults,
     budget_mode: "strict",
     maximum_budget: null,
     pace: "balanced",
@@ -100,15 +99,17 @@ type Proposal = {
 export default function Home() {
   const [form, setForm] = useState(initial);
   const [step, setStep] = useState(0);
-  const [proposal, setProposal] = useState<Proposal | null>(null);
-  const [confirmed, setConfirmed] = useState(false);
   const [tripId, setTripId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [attempted, setAttempted] = useState(false);
+  const [budgetInputInvalid, setBudgetInputInvalid] = useState(false);
   const heading = useRef<HTMLHeadingElement>(null);
   const o = form.options;
-  const field = <K extends keyof TripForm>(key: K, value: TripForm[K]) =>
+  const field = <K extends keyof TripForm>(key: K, value: TripForm[K]) => {
+    setError("");
     setForm((old) => ({ ...old, [key]: value }));
+  };
   const option = <K extends keyof Options>(key: K, value: Options[K]) =>
     field("options", { ...o, [key]: value });
   const updateStop = (index: number, change: Partial<Stop>) =>
@@ -120,14 +121,40 @@ export default function Home() {
     form.start_date && form.end_date
       ? dayjs(form.end_date).diff(dayjs(form.start_date), "day")
       : 0;
-  const allocated =
-    o.route.reduce((sum, s) => sum + (s.nights ?? 0) + s.travel_days, 0) +
-    (o.endpoint === "one_way" ? 0 : o.return_travel_days);
   const people = o.adults + o.child_ages.length;
+  const originInvalid =
+    o.journey !== "already_there" && (form.origin?.trim().length ?? 0) < 2;
+  const destinationNames = o.route.map((stop) =>
+    stop.location.trim().toLowerCase(),
+  );
+  const destinationInvalid = destinationNames.map(
+    (name) =>
+      name.length < 2 ||
+      destinationNames.indexOf(name) !== destinationNames.lastIndexOf(name),
+  );
+  const datesInvalid =
+    !form.start_date || !form.end_date || nights < 1 || nights > 90;
+  const budgetInvalid =
+    budgetInputInvalid ||
+    (form.budget !== null &&
+      (!Number.isFinite(form.budget) ||
+        form.budget <= 0 ||
+        form.budget > 9999999999.99));
+
+  function focusInvalid(formElement: HTMLFormElement) {
+    requestAnimationFrame(() => {
+      const invalid = formElement.querySelector<HTMLElement>(
+        '[aria-invalid="true"]',
+      );
+      invalid?.focus();
+      invalid?.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
+  }
 
   function navigate(next: number) {
     setStep(next);
     setError("");
+    setAttempted(false);
     requestAnimationFrame(() => {
       heading.current?.focus();
       document
@@ -136,35 +163,20 @@ export default function Home() {
     });
   }
 
-  async function submit(event: FormEvent) {
+  async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError("");
+    setAttempted(true);
     if (step === 0) {
-      const origin = form.origin?.trim() ?? "";
-      if (origin.length === 1 || (!origin && o.journey !== "already_there")) {
-        setError("Enter your starting city or choose a location suggestion.");
-        return;
-      }
-      if (!form.start_date || !form.end_date || nights < 1 || nights > 90) {
-        setError(
-          "Choose departure and return dates, between 1 and 90 nights apart.",
-        );
-        return;
-      }
-      if (o.route.some((s) => s.location.trim().length < 2)) {
-        setError("Add a city or country for each destination.");
-        return;
-      }
-      if (
-        new Set(o.route.map((stop) => stop.location.trim().toLowerCase()))
-          .size !== o.route.length
-      ) {
-        setError(
-          "List each destination once. You can adjust the nights at each stop later.",
-        );
+      if (originInvalid || datesInvalid || destinationInvalid.some(Boolean)) {
+        focusInvalid(event.currentTarget);
         return;
       }
       navigate(1);
+      return;
+    }
+    if (budgetInvalid) {
+      focusInvalid(event.currentTarget);
       return;
     }
     setLoading(true);
@@ -172,32 +184,41 @@ export default function Home() {
       ...o,
       endpoint: o.journey === "already_there" ? "one_way" : "return",
       end_location: null,
+      route: o.route.map((stop) => ({
+        ...stop,
+        flight_preferences: o.flight_preferences ?? flightDefaults,
+      })),
+      return_flight_preferences: o.flight_preferences ?? flightDefaults,
     };
     const payload = {
       ...form,
       options,
-      origin: form.origin?.trim() || null,
+      origin:
+        o.journey === "already_there" ? null : form.origin?.trim() || null,
       travelers: people,
     };
     try {
-      if (step === 1) {
-        const result = await api<Proposal>(
-          "/api/v1/trips/route-proposal",
-          payload,
+      const suggested = await api<Proposal>(
+        "/api/v1/trips/route-proposal",
+        payload,
+      );
+      if (suggested.conflicts.length) {
+        setError(
+          `Please adjust these details: ${suggested.conflicts.join("; ")}`,
         );
-        field("options", result.options);
-        setProposal(result);
-        setConfirmed(false);
-        navigate(2);
-      } else {
-        const result = await api<{ id: string }>("/api/v1/trips", payload);
-        setTripId(result.id);
-        requestAnimationFrame(() =>
-          document
-            .getElementById("planner")
-            ?.scrollIntoView({ behavior: "smooth" }),
-        );
+        return;
       }
+      const result = await api<{ id: string }>("/api/v1/trips", {
+        ...payload,
+        options: suggested.options,
+      });
+      setForm((old) => ({ ...old, options: suggested.options }));
+      setTripId(result.id);
+      requestAnimationFrame(() =>
+        document
+          .getElementById("planner")
+          ?.scrollIntoView({ behavior: "smooth" }),
+      );
     } catch (e) {
       setError(
         e instanceof Error
@@ -219,17 +240,6 @@ export default function Home() {
     });
   }
 
-  function moveStop(index: number, direction: number) {
-    const route = [...o.route];
-    [route[index], route[index + direction]] = [
-      route[index + direction],
-      route[index],
-    ];
-    // Transit belongs to the incoming leg; recheck after reordering.
-    option("route", route);
-    setConfirmed(false);
-  }
-
   return (
     <div className="voyage-site">
       <header className="site-header">
@@ -239,13 +249,7 @@ export default function Home() {
           </span>
           voyage<span className="brand-dot">.</span>
         </Link>
-        <nav aria-label="Main navigation">
-          <a href="#planner">Plan a trip</a>
-          <a href="#how-it-works">How it works</a>
-        </nav>
-        <span className="header-note">
-          A little less planning. A lot more living.
-        </span>
+        <span className="header-note">Less planning. A lot more living.</span>
       </header>
       <main>
         <section className="hero">
@@ -280,6 +284,7 @@ export default function Home() {
               <Paper
                 component="form"
                 onSubmit={submit}
+                noValidate
                 className="planner-card"
                 aria-busy={loading}
               >
@@ -288,13 +293,11 @@ export default function Home() {
                   alternativeLabel
                   className="planner-stepper"
                 >
-                  {["The essentials", "Your travel style", "Make it yours"].map(
-                    (label) => (
-                      <Step key={label}>
-                        <StepLabel>{label}</StepLabel>
-                      </Step>
-                    ),
-                  )}
+                  {["The essentials", "Your travel style"].map((label) => (
+                    <Step key={label}>
+                      <StepLabel>{label}</StepLabel>
+                    </Step>
+                  ))}
                 </Stepper>
                 <Divider sx={{ my: 3.5 }} />
                 <div className="form-heading">
@@ -314,7 +317,6 @@ export default function Home() {
                       [
                         "Where will curiosity take you?",
                         "What does your perfect trip feel like?",
-                        "A little fine-tuning. Then, adventure.",
                       ][step]
                     }
                   </Typography>
@@ -323,7 +325,6 @@ export default function Home() {
                       [
                         "Start with the big picture. We’ll help with the little details.",
                         "The best itineraries start with what matters to you.",
-                        "Your route is a starting point. Adjust it until it feels right.",
                       ][step]
                     }
                   </Typography>
@@ -357,21 +358,23 @@ export default function Home() {
                         </div>
                       </FormSection>
                       <FormSection title="Let’s put a pin in the map.">
-                        <LocationAutocomplete
-                          label={
-                            o.journey === "already_there"
-                              ? "From (optional)"
-                              : "From"
-                          }
-                          value={form.origin ?? ""}
-                          required={o.journey !== "already_there"}
-                          onChange={(value) => field("origin", value)}
-                          placeholder="Start typing a city, e.g. New York"
-                          citiesOnly
-                        />
+                        {o.journey !== "already_there" && (
+                          <LocationAutocomplete
+                            label="From"
+                            error={attempted && originInvalid}
+                            value={form.origin ?? ""}
+                            required
+                            onChange={(value) => field("origin", value)}
+                            placeholder="Start typing a city, e.g. New York"
+                            citiesOnly
+                          />
+                        )}
                         <div className="destinations-list">
                           {o.route.map((s, i) => (
-                            <div className="destination-row" key={i}>
+                            <div
+                              className={`destination-row ${o.route.length > 1 ? "removable" : ""}`}
+                              key={i}
+                            >
                               <span className="stop-number">
                                 {String(i + 1).padStart(2, "0")}
                               </span>
@@ -379,27 +382,31 @@ export default function Home() {
                                 label={
                                   o.route.length > 1
                                     ? `Destination ${i + 1}`
-                                    : "Where to?"
+                                    : o.journey === "already_there"
+                                      ? "Where"
+                                      : "Where to?"
                                 }
                                 value={s.location}
+                                error={attempted && destinationInvalid[i]}
                                 required
                                 onChange={(value) =>
                                   updateStop(i, { location: value })
                                 }
                                 placeholder="Try Tokyo, Japan…"
                               />
-                              <IconButton
-                                aria-label={`Remove destination ${i + 1}`}
-                                disabled={o.route.length === 1}
-                                onClick={() =>
-                                  option(
-                                    "route",
-                                    o.route.filter((_, n) => n !== i),
-                                  )
-                                }
-                              >
-                                <DeleteOutlineRounded />
-                              </IconButton>
+                              {o.route.length > 1 && (
+                                <IconButton
+                                  aria-label={`Remove destination ${i + 1}`}
+                                  onClick={() =>
+                                    option(
+                                      "route",
+                                      o.route.filter((_, n) => n !== i),
+                                    )
+                                  }
+                                >
+                                  <DeleteOutlineRounded />
+                                </IconButton>
+                              )}
                             </div>
                           ))}
                         </div>
@@ -413,29 +420,34 @@ export default function Home() {
                           Add another stop
                         </Button>
                       </FormSection>
+                      {o.journey === "flying" && (
+                        <FormSection
+                          title="How do you like to fly?"
+                          subtitle="We’ll use these preferences for flight searches throughout your trip."
+                        >
+                          <FlightFields
+                            value={o.flight_preferences ?? flightDefaults}
+                            onChange={(value) =>
+                              option("flight_preferences", value)
+                            }
+                          />
+                        </FormSection>
+                      )}
                       <FormSection title="Clear your calendar.">
                         <TravelDates
+                          error={attempted && !!datesInvalid}
+                          alreadyThere={o.journey === "already_there"}
                           start={form.start_date}
                           end={form.end_date}
-                          onChange={(start, end) =>
+                          onChange={(start, end) => {
+                            setError("");
                             setForm((old) => ({
                               ...old,
                               start_date: start,
                               end_date: end,
-                            }))
-                          }
+                            }));
+                          }}
                         />
-                        {nights > 0 && (
-                          <Chip
-                            size="small"
-                            label={`${nights} nights of possibility`}
-                            sx={{
-                              mt: 1.5,
-                              bgcolor: "#edf3e9",
-                              alignSelf: "flex-start",
-                            }}
-                          />
-                        )}
                         <Typography
                           variant="body2"
                           color="text.secondary"
@@ -516,45 +528,89 @@ export default function Home() {
                         )}
                       </FormSection>
                       <FormSection
-                        title="A good trip. A comfortable budget."
-                        subtitle="One total for your whole group: transport, stays, food, activities, and a little cushion."
+                        title="What feels right for your trip?"
+                        subtitle="Choose a spending style. Add a target if you have one, or leave the amount open."
                       >
-                        <TextField
-                          required
-                          label="Trip budget · USD"
-                          type="number"
-                          value={form.budget}
-                          slotProps={{ htmlInput: { min: 1, step: "0.01" } }}
-                          onChange={(e) => field("budget", +e.target.value)}
-                        />
-                        <div className="choice-grid two">
-                          <Choice
-                            selected={o.budget_mode === "strict"}
-                            title="Keep it within budget"
-                            subtitle="This is my spending ceiling"
-                            onClick={() => option("budget_mode", "strict")}
-                          />
-                          <Choice
-                            selected={o.budget_mode === "flexible"}
-                            title="A little room to stretch"
-                            subtitle="Worth it for the right experience"
-                            onClick={() => option("budget_mode", "flexible")}
+                        <div className="choice-grid three">
+                          {[
+                            {
+                              value: "budget",
+                              title: "Budget conscious",
+                              subtitle: "Keep costs down",
+                            },
+                            {
+                              value: "value",
+                              title: "Good value",
+                              subtitle:
+                                "Comfort, convenience & worthwhile experiences",
+                            },
+                            {
+                              value: "upscale",
+                              title: "Upscale",
+                              subtitle: "More comfort and room for extras",
+                            },
+                          ].map((style) => (
+                            <Choice
+                              key={style.value}
+                              selected={o.spending_style === style.value}
+                              title={style.title}
+                              subtitle={style.subtitle}
+                              onClick={() =>
+                                option(
+                                  "spending_style",
+                                  style.value as Options["spending_style"],
+                                )
+                              }
+                            />
+                          ))}
+                        </div>
+                        <div className="field-grid two">
+                          <TextField
+                            select
+                            label="Budget for"
+                            value={o.budget_basis ?? "per_person"}
+                            onChange={(e) =>
+                              option(
+                                "budget_basis",
+                                e.target.value as Options["budget_basis"],
+                              )
+                            }
+                          >
+                            <MenuItem value="per_person">Per person</MenuItem>
+                            <MenuItem value="group">Whole group</MenuItem>
+                          </TextField>
+                          <TextField
+                            label={
+                              o.budget_basis === "group"
+                                ? "Group target · USD (optional)"
+                                : "Target per person · USD (optional)"
+                            }
+                            type="number"
+                            name="budget"
+                            error={attempted && budgetInvalid}
+                            value={form.budget ?? ""}
+                            slotProps={{
+                              htmlInput: {
+                                min: 0.01,
+                                max: 9999999999.99,
+                                step: "0.01",
+                              },
+                            }}
+                            onChange={(e) => {
+                              setBudgetInputInvalid(!e.target.validity.valid);
+                              field(
+                                "budget",
+                                e.target.value === "" ? null : +e.target.value,
+                              );
+                            }}
                           />
                         </div>
-                        {o.budget_mode === "flexible" && (
-                          <TextField
-                            label="Most you’d be comfortable spending · USD"
-                            type="number"
-                            required
-                            value={o.maximum_budget ?? ""}
-                            slotProps={{
-                              htmlInput: { min: form.budget, step: "0.01" },
-                            }}
-                            onChange={(e) =>
-                              option("maximum_budget", +e.target.value)
-                            }
-                          />
-                        )}
+                        <Typography variant="body2" color="text.secondary">
+                          Per person works well for friends; a group target
+                          works well for families. Estimates include transport,
+                          stays, food and activities. Individual spending can
+                          vary.
+                        </Typography>
                       </FormSection>
                       <FormSection title="Find your rhythm.">
                         <div className="choice-grid three">
@@ -588,8 +644,8 @@ export default function Home() {
                         </div>
                       </FormSection>
                       <FormSection
-                        title="What draws you in?"
-                        subtitle="Pick as many as you like."
+                        title="What draws you in? (optional)"
+                        subtitle="Pick what you enjoy, or leave it open."
                       >
                         <Stack
                           direction="row"
@@ -640,11 +696,11 @@ export default function Home() {
                           }
                         >
                           <MenuItem value="either">
-                            Open to hotels & apartments
+                            Open to hotels & vacation rentals
                           </MenuItem>
                           <MenuItem value="hotel">Hotels</MenuItem>
                           <MenuItem value="apartment">
-                            Apartments & Airbnbs
+                            Vacation rentals
                           </MenuItem>
                         </TextField>
                         <FormControlLabel
@@ -683,206 +739,6 @@ export default function Home() {
                       </FormSection>
                     </>
                   )}
-                  {step === 2 && (
-                    <>
-                      <Alert
-                        severity={allocated === nights ? "success" : "warning"}
-                      >
-                        {allocated === nights
-                          ? `All ${nights} nights accounted for. Looking good.`
-                          : `${allocated} of ${nights} nights allocated. Adjust stays or transit nights to match your dates.`}
-                      </Alert>
-                      <Typography variant="body2" color="text.secondary">
-                        We keep arrival days light. Move stops, adjust your
-                        nights, and review the connections between them.
-                      </Typography>
-                      {o.route.map((s, i) => (
-                        <Paper
-                          variant="outlined"
-                          className="route-card"
-                          key={i}
-                        >
-                          <div className="route-card-heading">
-                            <span className="stop-number">
-                              {String(i + 1).padStart(2, "0")}
-                            </span>
-                            <Typography
-                              component="h3"
-                              variant="h6"
-                              sx={{ flex: 1 }}
-                            >
-                              Your {i + 1 === 1 ? "first" : "next"} stop
-                            </Typography>
-                            <IconButton
-                              aria-label={`Move stop ${i + 1} earlier`}
-                              disabled={i === 0}
-                              onClick={() => moveStop(i, -1)}
-                            >
-                              <NorthRounded fontSize="small" />
-                            </IconButton>
-                            <IconButton
-                              aria-label={`Move stop ${i + 1} later`}
-                              disabled={i === o.route.length - 1}
-                              onClick={() => moveStop(i, 1)}
-                            >
-                              <SouthRounded fontSize="small" />
-                            </IconButton>
-                          </div>
-                          <LocationAutocomplete
-                            label="Destination"
-                            value={s.location}
-                            required
-                            onChange={(v) => updateStop(i, { location: v })}
-                          />
-                          <Counter
-                            label="Nights here"
-                            detail="Time to explore"
-                            value={s.nights ?? 1}
-                            min={1}
-                            max={90}
-                            onChange={(n) => updateStop(i, { nights: n })}
-                          />
-                          {!(i === 0 && o.journey === "already_there") && (
-                            <Accordion
-                              disableGutters
-                              elevation={0}
-                              sx={{ "&::before": { display: "none" } }}
-                            >
-                              <AccordionSummary
-                                expandIcon={<ExpandMoreRounded />}
-                              >
-                                Getting here ·{" "}
-                                {s.mode === "flight"
-                                  ? "Flight"
-                                  : s.mode === "drive"
-                                    ? "Drive"
-                                    : "Train"}
-                              </AccordionSummary>
-                              <AccordionDetails>
-                                <TravelLeg
-                                  mode={s.mode}
-                                  transit={s.travel_days}
-                                  driving={o.journey === "driving"}
-                                  onMode={(v) => updateStop(i, { mode: v })}
-                                  onTransit={(n) =>
-                                    updateStop(i, { travel_days: n })
-                                  }
-                                />
-                                {s.mode === "flight" && (
-                                  <FlightFields
-                                    value={
-                                      s.flight_preferences ?? flightDefaults
-                                    }
-                                    onChange={(v) =>
-                                      updateStop(i, { flight_preferences: v })
-                                    }
-                                  />
-                                )}
-                              </AccordionDetails>
-                            </Accordion>
-                          )}
-                        </Paper>
-                      ))}
-                      {o.endpoint !== "one_way" && (
-                        <Accordion
-                          variant="outlined"
-                          disableGutters
-                          sx={{
-                            borderRadius: "14px !important",
-                            "&::before": { display: "none" },
-                          }}
-                        >
-                          <AccordionSummary expandIcon={<ExpandMoreRounded />}>
-                            <Stack
-                              direction="row"
-                              spacing={1}
-                              sx={{ alignItems: "center" }}
-                            >
-                              <FlightTakeoffRounded fontSize="small" />
-                              <span>Back to {form.origin}</span>
-                            </Stack>
-                          </AccordionSummary>
-                          <AccordionDetails>
-                            <TravelLeg
-                              mode={o.return_mode}
-                              transit={o.return_travel_days}
-                              driving={o.journey === "driving"}
-                              onMode={(v) => option("return_mode", v)}
-                              onTransit={(n) => option("return_travel_days", n)}
-                            />
-                            {o.return_mode === "flight" && (
-                              <FlightFields
-                                value={
-                                  o.return_flight_preferences ?? flightDefaults
-                                }
-                                onChange={(v) =>
-                                  option("return_flight_preferences", v)
-                                }
-                              />
-                            )}
-                          </AccordionDetails>
-                        </Accordion>
-                      )}
-                      <Accordion
-                        disableGutters
-                        sx={{
-                          bgcolor: "#f7f8f3",
-                          "&::before": { display: "none" },
-                          borderRadius: "12px !important",
-                        }}
-                      >
-                        <AccordionSummary expandIcon={<ExpandMoreRounded />}>
-                          A few things to double-check
-                        </AccordionSummary>
-                        <AccordionDetails>
-                          <Stack spacing={1.5}>
-                            {proposal?.assumptions.map((a, i) => (
-                              <Typography
-                                variant="body2"
-                                color="text.secondary"
-                                key={i}
-                              >
-                                {a}
-                              </Typography>
-                            ))}
-                            {o.notes && (
-                              <Typography variant="body2">
-                                Your notes: {o.notes}
-                              </Typography>
-                            )}
-                            {o.accessibility && (
-                              <Typography variant="body2">
-                                Accessibility: {o.accessibility}
-                              </Typography>
-                            )}
-                          </Stack>
-                        </AccordionDetails>
-                      </Accordion>
-                      {proposal?.conflicts.map((conflict, i) => (
-                        <Alert severity="warning" key={i}>
-                          {conflict}. Go back to update your preferences, then
-                          suggest the route again.
-                        </Alert>
-                      ))}
-                      <FormControlLabel
-                        sx={{ alignItems: "flex-start", m: 0 }}
-                        control={
-                          <Checkbox
-                            required
-                            checked={confirmed}
-                            onChange={(e) => setConfirmed(e.target.checked)}
-                            sx={{ pt: 0.3 }}
-                          />
-                        }
-                        label={
-                          <Typography variant="body2">
-                            This route feels right. I’ll confirm travel times,
-                            prices, and availability before booking.
-                          </Typography>
-                        }
-                      />
-                    </>
-                  )}
                 </fieldset>
                 {error && (
                   <Alert severity="error" sx={{ mt: 3 }} role="alert">
@@ -914,21 +770,11 @@ export default function Home() {
                         <ArrowForwardRounded />
                       )
                     }
-                    disabled={
-                      loading ||
-                      (step === 2 &&
-                        (allocated !== nights ||
-                          !confirmed ||
-                          !!proposal?.conflicts.length))
-                    }
+                    disabled={loading}
                   >
                     {loading
                       ? "Finding your way…"
-                      : [
-                          "Make it personal",
-                          "Find my route",
-                          "Let’s plan this trip",
-                        ][step]}
+                      : ["Make it personal", "Plan my trip"][step]}
                   </Button>
                 </div>
               </Paper>
@@ -944,25 +790,24 @@ export default function Home() {
                     The good part starts here.
                   </Typography>
                   <Typography color="text.secondary" sx={{ my: 2 }}>
-                    Generate your day-by-day itinerary, with ideas for what to
-                    do and where to stay.
+                    Your details are saved. We’re creating your day-by-day
+                    itinerary, with ideas for what to do and where to stay.
                   </Typography>
                   <Button
                     variant="outlined"
                     onClick={() => {
                       setTripId(null);
-                      setProposal(null);
                       navigate(0);
                     }}
                   >
                     Change details & start a new plan
                   </Button>
                 </Paper>
-                <TripItinerary key={tripId} tripId={tripId} />
+                <TripItinerary key={tripId} tripId={tripId} autoStart />
               </>
             )}
           </div>
-          <aside className="trip-sidebar">
+          <aside className="trip-sidebar" aria-label="Live trip snapshot">
             <TravelScene />
             <div className="sidebar-content">
               <span className="section-eyebrow">YOUR NEXT CHAPTER</span>
@@ -976,49 +821,60 @@ export default function Home() {
               <Stack spacing={2.5}>
                 <SummaryRow
                   icon={<LocationOnRounded />}
-                  label="The places"
+                  label="Your route"
                   value={
-                    o.route
-                      .map((s) => s.location)
+                    [
+                      ...(o.journey !== "already_there" && form.origin?.trim()
+                        ? [form.origin.trim()]
+                        : []),
+                      ...o.route.map((s) => s.location.trim()),
+                    ]
                       .filter(Boolean)
-                      .join(" → ") || "Somewhere wonderful"
+                      .join(" → ") || "Where will you go?"
                   }
                 />
                 <SummaryRow
                   icon={<ExploreRounded />}
-                  label="The time"
+                  label="Your dates"
                   value={
                     form.start_date && form.end_date
                       ? `${dayjs(form.start_date).format("MMM D")} – ${dayjs(form.end_date).format("MMM D")} · ${nights} nights`
-                      : "A little time away"
+                      : "Choose your travel dates"
                   }
                 />
-                <SummaryRow
-                  icon={<HotelRounded />}
-                  label="The company"
-                  value={`${people} traveler${people !== 1 ? "s" : ""} · ${o.rooms} room${o.rooms !== 1 ? "s" : ""}`}
-                />
+                {step > 0 && (
+                  <>
+                    <SummaryRow
+                      icon={<HotelRounded />}
+                      label="Your company"
+                      value={`${people} traveler${people !== 1 ? "s" : ""} · ${o.rooms} room${o.rooms !== 1 ? "s" : ""}`}
+                    />
+                    <SummaryRow
+                      icon={<SpaRounded />}
+                      label="Your pace"
+                      value={
+                        {
+                          relaxed: "Slow & easy",
+                          balanced: "A little of everything",
+                          busy: "See it all",
+                        }[o.pace]
+                      }
+                    />
+                    {form.preferences.length > 0 && (
+                      <SummaryRow
+                        icon={<ParkRounded />}
+                        label="Your interests"
+                        value={form.preferences.join(" · ")}
+                      />
+                    )}
+                  </>
+                )}
               </Stack>
-              <div className="sidebar-budget">
-                <span>YOUR GROUP BUDGET</span>
-                <strong>
-                  {new Intl.NumberFormat("en-US", {
-                    style: "currency",
-                    currency: "USD",
-                    maximumFractionDigits: 0,
-                  }).format(form.budget || 0)}
-                </strong>
-                <span>
-                  {o.budget_mode === "strict"
-                    ? "We’ll keep your estimate within this."
-                    : `Up to $${o.maximum_budget || "…"} for the right experience.`}
-                </span>
-              </div>
             </div>
             <p className="sidebar-footnote">
-              Thoughtful suggestions. Real possibilities.
-              <br />
-              Always confirm details before booking.
+              {step === 0
+                ? "Up next: your people, your pace, and the things you love."
+                : "We’ll work out the route and nights, and keep arrival days easy."}
             </p>
           </aside>
         </div>
@@ -1185,48 +1041,6 @@ function SummaryRow({
     </div>
   );
 }
-function TravelLeg({
-  mode,
-  transit,
-  driving,
-  onMode,
-  onTransit,
-}: {
-  mode: Stop["mode"];
-  transit: number;
-  driving: boolean;
-  onMode: (v: Stop["mode"]) => void;
-  onTransit: (n: number) => void;
-}) {
-  return (
-    <div className="field-grid two">
-      <TextField
-        select
-        label="Travel by"
-        disabled={driving}
-        value={mode}
-        onChange={(e) => onMode(e.target.value as Stop["mode"])}
-      >
-        <MenuItem value="flight">Flight</MenuItem>
-        <MenuItem value="train">Train</MenuItem>
-        <MenuItem value="drive">Drive</MenuItem>
-      </TextField>
-      <TextField
-        select
-        label="Nights in transit"
-        helperText="Overnight travel counts toward your dates"
-        value={transit}
-        onChange={(e) => onTransit(+e.target.value)}
-      >
-        {[0, 1, 2, 3].map((n) => (
-          <MenuItem key={n} value={n}>
-            {n === 0 ? "Same-day arrival" : `${n} night${n > 1 ? "s" : ""}`}
-          </MenuItem>
-        ))}
-      </TextField>
-    </div>
-  );
-}
 function FlightFields({
   value,
   onChange,
@@ -1235,23 +1049,72 @@ function FlightFields({
   onChange: (value: FlightPreferences) => void;
 }) {
   return (
-    <Stack spacing={2} sx={{ mt: 2 }}>
-      <TextField
-        select
-        label="Flight stops"
-        value={value.max_stops}
-        onChange={(e) => onChange({ ...value, max_stops: +e.target.value })}
-      >
-        <MenuItem value={0}>Nonstop only</MenuItem>
-        <MenuItem value={1}>Up to 1 stop</MenuItem>
-        <MenuItem value={2}>Up to 2 stops</MenuItem>
-      </TextField>
+    <Stack spacing={2.5}>
+      <FormControl>
+        <FormLabel id="flight-stops-label">Connections</FormLabel>
+        <RadioGroup
+          row
+          aria-labelledby="flight-stops-label"
+          value={value.max_stops === 0 ? "nonstop" : "connections"}
+          onChange={(e) =>
+            onChange({
+              ...value,
+              max_stops: e.target.value === "nonstop" ? 0 : 1,
+            })
+          }
+        >
+          <FormControlLabel
+            value="nonstop"
+            control={<Radio />}
+            label="Nonstop only"
+          />
+          <FormControlLabel
+            value="connections"
+            control={<Radio />}
+            label="Up to one stop is okay"
+          />
+        </RadioGroup>
+      </FormControl>
+      <FormControl>
+        <FormLabel id="overnight-label">Overnight flights</FormLabel>
+        <RadioGroup
+          row
+          aria-labelledby="overnight-label"
+          value={value.allow_overnight ? "yes" : "no"}
+          onChange={(e) =>
+            onChange({ ...value, allow_overnight: e.target.value === "yes" })
+          }
+        >
+          <FormControlLabel
+            value="no"
+            control={<Radio />}
+            label="No overnight flights"
+          />
+          <FormControlLabel
+            value="yes"
+            control={<Radio />}
+            label="Overnight is okay"
+          />
+        </RadioGroup>
+      </FormControl>
       <div className="field-grid two">
         <TextField
           label="Depart after (optional)"
           type="time"
           value={value.earliest_departure ?? ""}
-          slotProps={{ inputLabel: { shrink: true } }}
+          slotProps={{
+            inputLabel: { shrink: true },
+            input: {
+              onClick: (event) => {
+                const input = event.currentTarget.querySelector("input");
+                try {
+                  input?.showPicker?.();
+                } catch {
+                  /* Keyboard entry remains available if the browser cannot open its picker. */
+                }
+              },
+            },
+          }}
           onChange={(e) =>
             onChange({ ...value, earliest_departure: e.target.value || null })
           }
@@ -1260,23 +1123,24 @@ function FlightFields({
           label="Arrive before (optional)"
           type="time"
           value={value.latest_arrival ?? ""}
-          slotProps={{ inputLabel: { shrink: true } }}
+          slotProps={{
+            inputLabel: { shrink: true },
+            input: {
+              onClick: (event) => {
+                const input = event.currentTarget.querySelector("input");
+                try {
+                  input?.showPicker?.();
+                } catch {
+                  /* Keyboard entry remains available if the browser cannot open its picker. */
+                }
+              },
+            },
+          }}
           onChange={(e) =>
             onChange({ ...value, latest_arrival: e.target.value || null })
           }
         />
       </div>
-      <FormControlLabel
-        control={
-          <Checkbox
-            checked={value.allow_overnight}
-            onChange={(e) =>
-              onChange({ ...value, allow_overnight: e.target.checked })
-            }
-          />
-        }
-        label="Overnight flights are okay"
-      />
       <Typography variant="caption" color="text.secondary">
         Times are local to each airport. Confirm these preferences when booking.
       </Typography>

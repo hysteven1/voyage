@@ -322,10 +322,85 @@ def test_http_route_review_and_trip_creation(trip, monkeypatch):
         proposal = client.post("/api/v1/trips/route-proposal", json=trip)
         assert proposal.status_code == 200
         assert proposal.headers["X-Request-ID"]
-        response = client.post("/api/v1/trips", json={**trip, "options": proposal.json()["options"]})
+        response = client.post(
+            "/api/v1/trips", json={**trip, "options": proposal.json()["options"]}
+        )
         assert response.status_code == 201
         saved = response.json()
         assert saved["options"]["route"][0]["nights"] == 7
         assert saved["destination"] == "Paris, France"
         assert saved["status"] == "draft"
         assert saved["planning_error"] is None
+
+
+def test_optional_budget_uses_style_without_a_ceiling(trip):
+    trip["budget"] = None
+    trip["options"].update(budget_enforcement="target", spending_style="value")
+    data = approved(trip)
+    payload = TripCreate.model_validate(data)
+    assert payload.budget is None
+    plan = build_plan(data)
+    assert plan["budget"]["target"] is None
+    assert plan["budget"]["limit"] is None
+    assert plan["budget"]["remaining"] is None
+    assert Decimal(plan["budget"]["total"]) > 0
+    saved = main.create_trip(payload, MagicMock())
+    assert saved.budget is None
+    assert main.Trip.__table__.c.budget.nullable
+
+
+def test_budget_per_person_and_group_are_distinct(trip):
+    data = approved(trip)
+    data["budget"] = "1000"
+    data["options"].update(budget_basis="per_person", budget_enforcement="target")
+    per_person = build_plan(data)
+    assert per_person["budget"]["target"] == "2000.00"
+    assert per_person["budget"]["entered_amount"] == "1000.00"
+    assert per_person["budget"]["basis"] == "per_person"
+    assert per_person["budget"]["limit"] is None
+    data["options"]["budget_basis"] = "group"
+    group = build_plan(data)
+    assert group["budget"]["target"] == "1000.00"
+    assert group["budget"]["total"] == per_person["budget"]["total"]
+
+
+def test_optional_amount_is_a_target_with_a_clear_overage(trip):
+    data = approved(trip)
+    data["budget"] = "1"
+    data["options"].update(budget_enforcement="target", budget_basis="per_person")
+    plan = build_plan(data)
+    assert (
+        Decimal(plan["budget"]["above_target"]) == Decimal(plan["budget"]["total"]) - 2
+    )
+    assert Decimal(plan["budget"]["per_person_above_target"]) > 0
+
+
+def test_spending_style_changes_estimates_without_requiring_an_amount(trip):
+    data = approved(trip)
+    data["budget"] = None
+    totals = []
+    for style in ["budget", "value", "upscale"]:
+        data["options"]["spending_style"] = style
+        plan = build_plan(data)
+        assert plan["budget"]["spending_style"] == style
+        totals.append(Decimal(plan["budget"]["total"]))
+    assert totals[0] < totals[1] < totals[2]
+
+
+def test_global_flight_preferences_apply_to_every_flight_leg(trip):
+    preferences = {
+        "max_stops": 0,
+        "allow_overnight": False,
+        "earliest_departure": "17:00",
+        "latest_arrival": "22:00",
+    }
+    trip["options"]["flight_preferences"] = preferences
+    data = approved(trip)
+    assert data["options"]["route"][0]["flight_preferences"] == preferences
+    assert data["options"]["return_flight_preferences"] == preferences
+    plan = build_plan(data)
+    assert all(
+        leg["restrictions"] == preferences
+        for leg in plan["legs"]
+        if leg["mode"] == "flight"
+    )

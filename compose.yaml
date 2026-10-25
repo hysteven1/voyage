@@ -98,6 +98,7 @@ services:
     restart: unless-stopped
     environment:
       SERVICE_NAME: planning-worker
+      SERPAPI_API_KEY: ${SERPAPI_API_KEY:-}
       DATABASE_URL: postgresql+psycopg://voyage:${POSTGRES_PASSWORD:-voyage_local_dev}@postgres:5432/voyage
       TEMPORAL_ADDRESS: temporal:7233
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}

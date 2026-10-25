@@ -16,7 +16,7 @@ class TripCreate(BaseModel):
     end_date: date
 
     travelers: int = Field(ge=1, le=20)
-    budget: Decimal = Field(gt=0, max_digits=12, decimal_places=2)
+    budget: Decimal | None = Field(default=None, gt=0, max_digits=12, decimal_places=2)
 
     preferences: list[str] = Field(default_factory=list)
     options: TripOptions | None = None
@@ -36,13 +36,17 @@ class TripCreate(BaseModel):
                     "Choose one-way or a final destination when origin is omitted"
                 )
             if options.budget_mode == "flexible" and (
-                options.maximum_budget is None or options.maximum_budget < self.budget
+                self.budget is None
+                or options.maximum_budget is None
+                or options.maximum_budget < self.budget
             ):
                 raise ValueError(
                     "Flexible budgets need a maximum at or above the target"
                 )
             self.travelers = options.adults + len(options.child_ages)
             self.destination = " → ".join(s.location for s in options.route)[:255]
+        elif self.budget is None:
+            raise ValueError("Provide trip options to plan without a budget")
         elif len(self.destination) < 2 or not self.origin:
             raise ValueError("Supply origin and destination, or expanded trip options")
         return self

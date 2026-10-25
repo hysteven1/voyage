@@ -121,7 +121,7 @@ def load_trip(trip_id: str) -> dict:
             "start_date": row["start_date"].isoformat(),
             "end_date": row["end_date"].isoformat(),
             "travelers": row["travelers"],
-            "budget": str(row["budget"]),
+            "budget": str(row["budget"]) if row["budget"] is not None else None,
             "preferences": row["preferences"],
             "options": row["options"],
         }

@@ -76,7 +76,7 @@ export type ExpandedPlan = {
     subtotal: string;
   }[];
   suggestion_source: string;
-  budget: Record<string, string>;
+  budget: Record<string, string | null | undefined>;
   assumptions: string[];
   notes: string;
   accessibility: string;
@@ -106,12 +106,14 @@ function Search({
     </a>
   );
 }
-const usd = (value: string) =>
-  new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
-    maximumFractionDigits: 2,
-  }).format(Number(value));
+const usd = (value: string | null | undefined) =>
+  value == null
+    ? "—"
+    : new Intl.NumberFormat("en-US", {
+        style: "currency",
+        currency: "USD",
+        maximumFractionDigits: 2,
+      }).format(Number(value));
 export default function ExpandedItinerary({ plan }: { plan: ExpandedPlan }) {
   return (
     <section className="itinerary-stack" aria-label="Your itinerary">
@@ -150,7 +152,7 @@ export default function ExpandedItinerary({ plan }: { plan: ExpandedPlan }) {
       </Paper>
       <Paper component="section" className="itinerary-panel">
         <Typography component="h3" className="itinerary-section-title">
-          The big picture · your group’s budget
+          The big picture · estimated costs
         </Typography>
         <Box
           sx={{
@@ -186,18 +188,52 @@ export default function ExpandedItinerary({ plan }: { plan: ExpandedPlan }) {
         </dl>
         <Divider sx={{ my: 2.5 }} />
         <Stack spacing={1}>
-          <Typography variant="body2">
-            Your target: {usd(plan.budget.target)} · Maximum:{" "}
-            {usd(plan.budget.limit)}
-          </Typography>
-          <Typography variant="body2" color="primary">
-            Remaining allowance: {usd(plan.budget.remaining)}
-          </Typography>
+          {plan.budget.per_person_total && (
+            <Typography variant="body2" color="text.secondary">
+              About {usd(plan.budget.per_person_total)} per person if shared
+              evenly. Individual spending can vary.
+            </Typography>
+          )}
+          {plan.budget.target != null && (
+            <Typography variant="body2">
+              Your target:{" "}
+              {usd(plan.budget.entered_amount ?? plan.budget.target)}{" "}
+              {plan.budget.basis === "per_person"
+                ? "per person"
+                : "for the group"}
+            </Typography>
+          )}
+          {plan.budget.limit != null && (
+            <Typography variant="body2">
+              Spending ceiling: {usd(plan.budget.limit)} for the group
+            </Typography>
+          )}
           {Number(plan.budget.above_target) > 0 && (
             <Alert severity="info">
-              This estimate is {usd(plan.budget.above_target)} above your
-              target, within your maximum.
+              This estimate is{" "}
+              {plan.budget.basis === "per_person"
+                ? `${usd(plan.budget.per_person_above_target)} per person`
+                : `${usd(plan.budget.above_target)} for the group`}{" "}
+              above your target.
+              {plan.budget.limit != null
+                ? " It is within your maximum."
+                : " Choose a lower spending style or adjust your trip if you’d like to spend less."}
             </Alert>
+          )}
+          {plan.budget.target == null && (
+            <Typography variant="body2" color="text.secondary">
+              Planned for your{" "}
+              {
+                (
+                  {
+                    budget: "budget-conscious",
+                    value: "good-value",
+                    upscale: "upscale",
+                  } as Record<string, string>
+                )[plan.budget.spending_style ?? "value"]
+              }{" "}
+              style, without a spending target.
+            </Typography>
           )}
         </Stack>
         <Accordion

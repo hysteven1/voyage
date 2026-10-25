@@ -1,140 +1,87 @@
 import { expect, test, type Page } from "@playwright/test";
+import type { TripForm } from "../../src/lib/trip";
 
 async function chooseDates(page: Page) {
   await page.getByRole("button", { name: /choose your travel dates/i }).click();
   const calendar = page.getByRole("dialog");
-  await expect(calendar).toBeVisible();
-  await calendar.getByRole("gridcell", { name: "2", exact: true }).click();
+  await calendar
+    .getByRole("gridcell", { name: "November 2, 2026", exact: true })
+    .click();
   await expect(
-    calendar.getByRole("gridcell", { name: "1", exact: true }),
+    calendar.getByRole("gridcell", { name: "November 1, 2026", exact: true }),
   ).toBeDisabled();
-  await calendar.getByRole("gridcell", { name: "8", exact: true }).click();
+  await calendar
+    .getByRole("gridcell", { name: "November 8, 2026", exact: true })
+    .click();
+  await expect(
+    calendar.getByRole("gridcell", { name: "November 2, 2026", exact: true }),
+  ).toHaveAttribute("aria-description", "Start date");
+  await expect(
+    calendar.getByRole("gridcell", { name: "November 8, 2026", exact: true }),
+  ).toHaveAttribute("aria-description", "End date");
+  await expect(
+    calendar.getByRole("gridcell", { name: "November 5, 2026", exact: true }),
+  ).toHaveAttribute("aria-selected", "true");
+  await expect(
+    calendar
+      .getByRole("gridcell", { name: "November 5, 2026", exact: true })
+      .locator(".."),
+  ).toHaveCSS("background-color", "rgb(227, 238, 229)");
   await calendar.getByRole("button", { name: "Use these dates" }).click();
   await expect(calendar).not.toBeVisible();
-  await expect(
-    page.getByText("Nov 2, 2026 — Nov 8, 2026", { exact: true }),
-  ).toBeVisible();
+  await expect(page.getByText("Nov 2, 2026", { exact: true })).toBeVisible();
+  await expect(page.getByText("Nov 8, 2026", { exact: true })).toBeVisible();
+  await expect(page.getByText(/nights of possibility/)).toHaveCount(0);
 }
-
 async function selectLocation(
   page: Page,
   label: string,
   query: string,
   suggestion: string,
 ) {
-  const field = page.getByRole("combobox", { name: label, exact: true });
-  await field.fill(query);
+  const input = page.getByRole("combobox", { name: label, exact: true });
+  await input.fill(query);
   await page
     .getByRole("option", { name: new RegExp(suggestion) })
     .first()
     .click();
-  await expect(field).toHaveValue(suggestion);
+  await expect(input).toHaveValue(suggestion);
 }
 
-test.beforeEach(async ({ page }) => {
-  await page.clock.setFixedTime(new Date("2026-11-01T14:00:00Z"));
-  await page.goto("/");
-});
-
-test("locations autocomplete, calendar dates, and mobile layout", async ({
-  page,
-}, testInfo) => {
-  await selectLocation(page, "From", "tok", "Tokyo, Japan");
-  const destination = page.getByRole("combobox", {
-    name: "Where to?",
-    exact: true,
-  });
-  await destination.fill("kyo");
-  await expect(
-    page.getByRole("option", { name: /Kyoto, Japan/ }),
-  ).toBeVisible();
-  await destination.press("Enter");
-  // Auto-highlight + keyboard navigation must select a real suggestion.
-  await expect(destination).toHaveValue("Kyoto, Japan");
-  await chooseDates(page);
-  await expect(page.getByText("End of journey", { exact: true })).toHaveCount(
-    0,
-  );
-  expect(
-    await page.evaluate(
-      () => document.documentElement.scrollWidth <= window.innerWidth,
-    ),
-  ).toBeTruthy();
-  await page.evaluate(() => window.scrollTo({ top: 0, behavior: "instant" }));
-  await page.screenshot({
-    animations: "disabled",
-    path: `/tmp/voyage-${testInfo.project.name}-planner.png`,
-    fullPage: true,
-  });
-  await page.getByRole("button", { name: "Make it personal" }).click();
-  await expect(
-    page.getByRole("heading", {
-      name: "What does your perfect trip feel like?",
-    }),
-  ).toBeVisible();
-  await expect(
-    page.getByRole("heading", { name: "Who’s coming along?" }),
-  ).toBeVisible();
-  for (let i = 0; i < 3; i++)
-    await page
-      .getByRole("button", { name: "Increase adults", exact: true })
-      .click();
-  await expect(
-    page.getByRole("status", { name: "Rooms", exact: true }),
-  ).toHaveText("2");
-});
-
-test("already-there trips omit origin and preserve the new default through saving", async ({
-  page,
-}) => {
-  await page.getByRole("button", { name: /Already there/ }).click();
-  await selectLocation(page, "Where to?", "tok", "Tokyo, Japan");
-  await chooseDates(page);
-  await page.getByRole("button", { name: "Make it personal" }).click();
+async function mockPlanner(page: Page) {
+  const captured: {
+    proposal?: TripForm;
+    created?: TripForm;
+    starts: number;
+  } = { starts: 0 };
   await page.route("**/api/v1/trips/route-proposal", async (route) => {
     const input = route.request().postDataJSON();
-    expect(input.origin).toBeNull();
-    expect(input.options.endpoint).toBe("one_way");
-    expect(input.options.end_location).toBeNull();
+    captured.proposal = input;
     input.options.route[0] = {
       ...input.options.route[0],
       nights: 6,
       travel_days: 0,
-      mode: "train",
+      mode: "flight",
+      flight_preferences: input.options.flight_preferences,
     };
+    input.options.return_travel_days = 0;
     await route.fulfill({
       json: {
         options: input.options,
-        assumptions: ["Confirm local details"],
+        assumptions: [],
         conflicts: [],
         source: "offline_estimates",
       },
     });
   });
-  await page.getByRole("button", { name: "Find my route" }).click();
-  await expect(
-    page.getByRole("heading", {
-      name: "A little fine-tuning. Then, adventure.",
-    }),
-  ).toBeVisible();
-  await expect(
-    page.getByText("All 6 nights accounted for. Looking good."),
-  ).toBeVisible();
-  await page.getByRole("checkbox", { name: /This route feels right/ }).check();
   await page.route("**/api/v1/trips", async (route) => {
-    expect(route.request().postDataJSON().options.endpoint).toBe("one_way");
+    captured.created = route.request().postDataJSON();
     await route.fulfill({ json: { id: "test-trip" } });
   });
-  await page.getByRole("button", { name: "Let’s plan this trip" }).click();
-  await expect(
-    page.getByRole("heading", { name: "The good part starts here." }),
-  ).toBeVisible();
-  await expect(
-    page.getByRole("button", { name: "Create my itinerary" }),
-  ).toBeVisible();
-  await page.route("**/api/v1/trips/test-trip/plan", (route) =>
-    route.fulfill({ json: { status: "planning" } }),
-  );
+  await page.route("**/api/v1/trips/test-trip/plan", async (route) => {
+    captured.starts++;
+    await route.fulfill({ json: { status: "planning" } });
+  });
   await page.route("**/api/v1/trips/test-trip", (route) =>
     route.fulfill({ json: { status: "completed" } }),
   );
@@ -145,6 +92,7 @@ test("already-there trips omit origin and preserve the new default through savin
         trip_id: "test-trip",
         currency: "USD",
         data_source: "planning_estimates",
+        suggestion_source: "offline_templates",
         narrative: {
           title: "A week in Tokyo",
           summary: "A little exploration, a little breathing room.",
@@ -158,10 +106,12 @@ test("already-there trips omit origin and preserve the new default through savin
           car: "0",
           contingency: "205.50",
           total: "1575.50",
-          target: "3000",
-          limit: "3000",
-          remaining: "1424.50",
-          above_target: "0",
+          target: null,
+          limit: null,
+          remaining: null,
+          above_target: null,
+          per_person_total: "787.75",
+          spending_style: "value",
         },
         destination_estimates: [
           {
@@ -183,7 +133,7 @@ test("already-there trips omit origin and preserve the new default through savin
             type: "either",
             estimated_cost: "660",
             search_url: "https://www.google.com/search?q=Tokyo+hotels",
-            criteria: "Check recent reviews and transit access.",
+            criteria: "Check reviews and transit access.",
           },
         ],
         rental_car: null,
@@ -203,49 +153,163 @@ test("already-there trips omit origin and preserve the new default through savin
                 search_url: "https://www.google.com/search?q=Tokyo+walks",
               },
             ],
-            rain_alternative: {
-              name: "A neighborhood café",
-              search_url: "https://www.google.com/search?q=Tokyo+cafes",
-            },
+            rain_alternative: null,
           },
         ],
-        assumptions: ["Planning estimates, not quotes."],
+        assumptions: [],
         notes: "",
         accessibility: "",
-        suggestion_source: "offline_templates",
       },
     }),
   );
-  await page.getByRole("button", { name: "Create my itinerary" }).click();
+  return captured;
+}
+
+test.beforeEach(async ({ page }) => {
+  await page.clock.setFixedTime(new Date("2026-11-01T14:00:00Z"));
+  await page.goto("/");
+});
+
+test("polished fields, live route summary, and aligned destination controls", async ({
+  page,
+}, info) => {
+  await expect(
+    page.getByRole("banner").getByRole("link", { name: "Plan a trip" }),
+  ).toHaveCount(0);
+  await expect(
+    page.getByRole("banner").getByText("Less planning. A lot more living."),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: /Remove destination/ }),
+  ).toHaveCount(0);
+  const from = page.getByRole("combobox", { name: "From", exact: true });
+  const centers = await from.evaluate((input) => {
+    const form = input.closest(".MuiFormControl-root")!;
+    const label = form
+      .querySelector(".MuiInputLabel-root")!
+      .getBoundingClientRect();
+    const field = form
+      .querySelector(".MuiOutlinedInput-root")!
+      .getBoundingClientRect();
+    return {
+      distance: Math.abs(
+        label.y + label.height / 2 - field.y - field.height / 2,
+      ),
+      height: field.height,
+    };
+  });
+  expect(centers.distance).toBeLessThan(3);
+  expect(centers.height).toBeGreaterThanOrEqual(56);
+  await selectLocation(page, "From", "tok", "Tokyo, Japan");
+  await page
+    .getByRole("heading", { name: "Let’s put a pin in the map." })
+    .click();
+  await from.click();
+  expect(
+    await from.evaluate(
+      (input) =>
+        (input as HTMLInputElement).selectionStart ===
+        (input as HTMLInputElement).selectionEnd,
+    ),
+  ).toBeTruthy();
+  await expect(from).toHaveCSS("outline-style", "none");
+  const where = page.getByRole("combobox", { name: "Where to?", exact: true });
+  await where.fill("kyo");
+  await expect(
+    page.getByRole("option", { name: /Kyoto, Japan/ }),
+  ).toBeVisible();
+  await where.press("Enter");
+  await expect(where).toHaveValue("Kyoto, Japan");
+  if (info.project.name === "desktop") {
+    await expect(page.getByRole("complementary")).toContainText(
+      "Tokyo, Japan → Kyoto, Japan",
+    );
+    await expect(page.getByRole("complementary")).not.toContainText(/budget/i);
+  }
+  await page.getByRole("button", { name: "Add another stop" }).click();
+  await expect(
+    page.getByRole("combobox", { name: "Destination 1", exact: true }),
+  ).toHaveValue("Kyoto, Japan");
+  await expect(
+    page.getByText("Search or enter a city or country."),
+  ).toHaveCount(0);
+  await expect(
+    page.getByRole("button", { name: /Remove destination/ }),
+  ).toHaveCount(2);
+  const alignment = await page
+    .getByRole("button", { name: "Remove destination 1" })
+    .evaluate((button) => {
+      const field = button
+        .closest(".destination-row")!
+        .querySelector(".MuiOutlinedInput-root")!
+        .getBoundingClientRect();
+      const icon = button.getBoundingClientRect();
+      return Math.abs(field.y + field.height / 2 - icon.y - icon.height / 2);
+    });
+  expect(alignment).toBeLessThan(2);
+  await page.getByRole("button", { name: "Remove destination 2" }).click();
+  await expect(
+    page.getByRole("button", { name: /Remove destination/ }),
+  ).toHaveCount(0);
+  await chooseDates(page);
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  ).toBeTruthy();
+  await page.evaluate(() => window.scrollTo({ top: 0, behavior: "instant" }));
+  await page.screenshot({
+    path: `/tmp/voyage-${info.project.name}-polished.png`,
+    fullPage: true,
+    animations: "disabled",
+  });
+});
+
+test("already-there hides origin, offers an optional budget, and generates in two steps", async ({
+  page,
+}) => {
+  await page
+    .getByRole("combobox", { name: "From", exact: true })
+    .fill("London, UK");
+  await page.getByRole("button", { name: /Already there/ }).click();
+  await expect(page.getByRole("combobox", { name: /From/ })).toHaveCount(0);
+  await selectLocation(page, "Where", "tok", "Tokyo, Japan");
+  await chooseDates(page);
+  await page.getByRole("button", { name: "Make it personal" }).click();
+  await expect(
+    page.getByRole("heading", { name: "What draws you in? (optional)" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Relaxation", exact: true }),
+  ).toHaveCount(0);
+  await expect(
+    page.getByRole("button", { name: /Good value/ }),
+  ).toHaveAttribute("aria-pressed", "true");
+  await expect(
+    page.getByRole("spinbutton", {
+      name: "Target per person · USD (optional)",
+    }),
+  ).toHaveValue("");
+  const captured = await mockPlanner(page);
+  await page.getByRole("button", { name: "Plan my trip" }).click();
   await expect(
     page.getByRole("heading", { name: "A week in Tokyo" }),
   ).toBeVisible();
-  await expect(
-    page.getByRole("link", { name: "An easy neighborhood walk" }),
-  ).toBeVisible();
+  expect(captured.created?.origin).toBeNull();
+  expect(captured.created?.budget).toBeNull();
+  expect(captured.created?.options.endpoint).toBe("one_way");
+  expect(captured.created?.options.spending_style).toBe("value");
+  expect(captured.starts).toBe(1);
+  await expect(page.getByText(/Maximum:/)).toHaveCount(0);
+  await expect(page.getByText(/without a spending target/)).toBeVisible();
   expect(
     await page.evaluate(
-      () => document.documentElement.scrollWidth <= window.innerWidth,
+      () => document.documentElement.scrollWidth <= innerWidth,
     ),
   ).toBeTruthy();
 });
 
-test("manual locations remain usable when suggestions are unavailable", async ({
-  page,
-}) => {
-  await page.route("**/api/locations?**", (route) =>
-    route.fulfill({ status: 503, json: {} }),
-  );
-  const field = page.getByRole("combobox", { name: "From", exact: true });
-  await field.fill("Somewhere quiet");
-  await expect(
-    page.getByText("Suggestions unavailable. You can still enter a location."),
-  ).toBeVisible();
-  await field.press("Tab");
-  await expect(field).toHaveValue("Somewhere quiet");
-});
-
-test("departures require dates and step changes retain typed locations", async ({
+test("first-page flight preferences and per-person targets reach every leg", async ({
   page,
 }) => {
   await page
@@ -254,62 +318,191 @@ test("departures require dates and step changes retain typed locations", async (
   await page
     .getByRole("combobox", { name: "Where to?", exact: true })
     .fill("Tokyo, Japan");
-  await page.getByRole("button", { name: "Make it personal" }).click();
-  await expect(
-    page
-      .getByRole("alert")
-      .filter({ hasText: "Choose departure and return dates" }),
-  ).toContainText("Choose departure and return dates");
+  await page.getByRole("radio", { name: "Nonstop only", exact: true }).check();
+  await page
+    .getByRole("radio", { name: "No overnight flights", exact: true })
+    .check();
+  await page.getByLabel("Depart after (optional)").fill("17:00");
+  await page.getByLabel("Arrive before (optional)").fill("22:00");
   await chooseDates(page);
   await page.getByRole("button", { name: "Make it personal" }).click();
-  await page.getByRole("button", { name: "Back", exact: true }).click();
+  await page
+    .getByRole("spinbutton", { name: "Target per person · USD (optional)" })
+    .fill("1500");
+  const captured = await mockPlanner(page);
+  await page.getByRole("button", { name: "Plan my trip" }).click();
   await expect(
-    page.getByRole("combobox", { name: "From", exact: true }),
-  ).toHaveValue("London, UK");
-  await expect(
-    page.getByRole("combobox", { name: "Where to?", exact: true }),
-  ).toHaveValue("Tokyo, Japan");
+    page.getByRole("heading", { name: "A week in Tokyo" }),
+  ).toBeVisible();
+  expect(captured.created?.budget).toBe(1500);
+  expect(captured.created?.options.budget_basis).toBe("per_person");
+  expect(captured.created?.options.budget_enforcement).toBe("target");
+  const preferences = {
+    max_stops: 0,
+    allow_overnight: false,
+    earliest_departure: "17:00",
+    latest_arrival: "22:00",
+  };
+  expect(captured.created?.options.route[0].flight_preferences).toEqual(
+    preferences,
+  );
+  expect(captured.created?.options.return_flight_preferences).toEqual(
+    preferences,
+  );
 });
 
-for (const journey of ["flying", "driving"] as const) {
-  test(`${journey} trips default to returning home without an endpoint selector`, async ({
-    page,
-  }) => {
-    if (journey === "driving")
-      await page.getByRole("button", { name: /Road trip/ }).click();
+test("whole-group budgets, style choices, and vacation rentals", async ({
+  page,
+}) => {
+  await page.getByRole("button", { name: /Road trip/ }).click();
+  await expect(
+    page.getByRole("radiogroup", { name: "Connections" }),
+  ).toHaveCount(0);
+  await page
+    .getByRole("combobox", { name: "From", exact: true })
+    .fill("London, UK");
+  await page
+    .getByRole("combobox", { name: "Where to?", exact: true })
+    .fill("Paris, France");
+  await chooseDates(page);
+  await page.getByRole("button", { name: "Make it personal" }).click();
+  await page.getByRole("combobox", { name: "Budget for" }).click();
+  await page.getByRole("option", { name: "Whole group", exact: true }).click();
+  await page
+    .getByRole("spinbutton", { name: "Group target · USD (optional)" })
+    .fill("4000");
+  await page.getByRole("button", { name: /Budget conscious/ }).click();
+  await page
+    .getByRole("combobox", { name: "Where do you like to stay?" })
+    .click();
+  await page
+    .getByRole("option", { name: "Vacation rentals", exact: true })
+    .click();
+  for (let i = 0; i < 3; i++)
     await page
-      .getByRole("combobox", { name: "From", exact: true })
-      .fill("London, UK");
-    await page
-      .getByRole("combobox", { name: "Where to?", exact: true })
-      .fill("Paris, France");
-    await chooseDates(page);
-    await page.getByRole("button", { name: "Make it personal" }).click();
-    await page.route("**/api/v1/trips/route-proposal", async (route) => {
-      const input = route.request().postDataJSON();
-      expect(input.options.endpoint).toBe("return");
-      expect(input.options.end_location).toBeNull();
-      expect(input.options.journey).toBe(journey);
-      input.options.route[0] = {
-        ...input.options.route[0],
-        nights: 6,
-        travel_days: 0,
-        mode: journey === "driving" ? "drive" : "flight",
-      };
-      input.options.return_travel_days = 0;
-      input.options.return_mode = journey === "driving" ? "drive" : "flight";
-      await route.fulfill({
-        json: {
-          options: input.options,
-          source: "offline_estimates",
-          assumptions: [],
-          conflicts: [],
-        },
-      });
-    });
-    await page.getByRole("button", { name: "Find my route" }).click();
-    await expect(
-      page.getByRole("button", { name: "Back to London, UK" }),
-    ).toBeVisible();
+      .getByRole("button", { name: "Increase adults", exact: true })
+      .click();
+  await expect(
+    page.getByRole("status", { name: "Rooms", exact: true }),
+  ).toHaveText("2");
+  const captured = await mockPlanner(page);
+  await page.getByRole("button", { name: "Plan my trip" }).click();
+  await expect(
+    page.getByRole("heading", { name: "A week in Tokyo" }),
+  ).toBeVisible();
+  expect(captured.created?.options.budget_basis).toBe("group");
+  expect(captured.created?.options.spending_style).toBe("budget");
+  expect(captured.created?.options.lodging).toBe("apartment");
+  expect(captured.created?.preferences).toEqual([]);
+});
+
+test("manual entry survives unavailable suggestions and validation clears after correction", async ({
+  page,
+}) => {
+  await page.route("**/api/locations?**", (route) =>
+    route.fulfill({ status: 503, json: {} }),
+  );
+  const from = page.getByRole("combobox", { name: "From", exact: true });
+  await from.fill("Somewhere quiet");
+  await expect(
+    page.getByText("Suggestions unavailable. You can still enter a location."),
+  ).toBeVisible();
+  await from.press("Tab");
+  await expect(from).toHaveValue("Somewhere quiet");
+  await page
+    .getByRole("combobox", { name: "Where to?", exact: true })
+    .fill("Tokyo, Japan");
+  await page.getByRole("button", { name: "Make it personal" }).click();
+  const dates = page.getByRole("button", { name: /choose your travel dates/i });
+  await expect(dates).toHaveAttribute("aria-invalid", "true");
+  await expect(page.locator('.planner-card [role="alert"]')).toHaveCount(0);
+  await chooseDates(page);
+  await expect(
+    page.getByRole("button", { name: /Nov 2, 2026 — Nov 8, 2026/ }),
+  ).toHaveAttribute("aria-invalid", "false");
+});
+
+test("a cross-month date range remains highlighted when reopened and clears correctly", async ({
+  page,
+}, info) => {
+  await page.getByRole("button", { name: /choose your travel dates/i }).click();
+  const calendar = page.getByRole("dialog");
+  await calendar
+    .getByRole("gridcell", { name: "November 2, 2026", exact: true })
+    .click();
+  await calendar.getByRole("button", { name: "Next month" }).click();
+  await calendar
+    .getByRole("gridcell", { name: "December 8, 2026", exact: true })
+    .click();
+  await expect(
+    calendar.getByRole("gridcell", { name: "December 5, 2026", exact: true }),
+  ).toHaveAttribute("aria-selected", "true");
+  await calendar.getByRole("button", { name: "Use these dates" }).click();
+  await expect(calendar).not.toBeVisible();
+  await page.getByRole("button", { name: /Nov 2, 2026 — Dec 8, 2026/ }).click();
+  await expect(
+    calendar.getByRole("gridcell", { name: "November 2, 2026", exact: true }),
+  ).toHaveAttribute("aria-description", "Start date");
+  await calendar.getByRole("button", { name: /Return.*Dec 8/ }).click();
+  await expect(
+    calendar.getByRole("gridcell", { name: "December 8, 2026", exact: true }),
+  ).toHaveAttribute("aria-description", "End date");
+  await page.screenshot({
+    path: `/tmp/voyage-${info.project.name}-date-range.png`,
+    animations: "disabled",
   });
-}
+  await calendar.getByRole("button", { name: "Clear dates" }).click();
+  await expect(calendar.getByRole("gridcell", { selected: true })).toHaveCount(
+    0,
+  );
+  await expect(
+    calendar.getByRole("button", { name: "Use these dates" }),
+  ).toBeDisabled();
+});
+
+test("Next highlights missing fields together and clears red borders when corrected", async ({
+  page,
+}) => {
+  const from = page.getByRole("combobox", { name: "From", exact: true });
+  const where = page.getByRole("combobox", { name: "Where to?", exact: true });
+  const dates = page.getByRole("button", { name: /choose your travel dates/i });
+  await expect(from).toHaveAttribute("aria-invalid", "false");
+  await page.getByRole("button", { name: "Make it personal" }).click();
+  await expect(from).toHaveAttribute("aria-invalid", "true");
+  await expect(where).toHaveAttribute("aria-invalid", "true");
+  await expect(dates).toHaveAttribute("aria-invalid", "true");
+  await expect(dates).toHaveCSS("border-top-color", "rgb(180, 64, 61)");
+  await expect(page.locator('.planner-card [role="alert"]')).toHaveCount(0);
+  await from.fill("London, UK");
+  await where.fill("Tokyo, Japan");
+  await expect(from).toHaveAttribute("aria-invalid", "false");
+  await expect(where).toHaveAttribute("aria-invalid", "false");
+  await chooseDates(page);
+  await page.getByRole("button", { name: "Make it personal" }).click();
+  const budget = page.getByRole("spinbutton", {
+    name: "Target per person · USD (optional)",
+  });
+  await budget.fill("-1");
+  await page.getByRole("button", { name: "Plan my trip" }).click();
+  await expect(budget).toHaveAttribute("aria-invalid", "true");
+  await budget.fill("");
+  await expect(budget).toHaveAttribute("aria-invalid", "false");
+});
+
+test("clicking either time field opens the native picker without using its clock icon", async ({
+  page,
+}) => {
+  await page.evaluate(() => {
+    const nativePicker = HTMLInputElement.prototype.showPicker;
+    HTMLInputElement.prototype.showPicker = function () {
+      nativePicker.call(this);
+      this.dataset.pickerOpened = "true";
+    };
+  });
+  for (const label of ["Depart after (optional)", "Arrive before (optional)"]) {
+    const input = page.getByLabel(label);
+    await input.locator("..").click({ position: { x: 20, y: 12 } });
+    await expect(input).toHaveAttribute("data-picker-opened", "true");
+    await page.keyboard.press("Escape");
+  }
+});

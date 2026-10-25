@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Alert,
   Button,
@@ -37,20 +37,19 @@ type LegacyPlan = {
   budget: { total: string; remaining: string };
 };
 
-export default function TripItinerary({ tripId }: { tripId: string }) {
+export default function TripItinerary({
+  tripId,
+  autoStart = false,
+}: {
+  tripId: string;
+  autoStart?: boolean;
+}) {
   const [status, setStatus] = useState("draft");
   const [plan, setPlan] = useState<LegacyPlan | ExpandedPlan | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const generation = useRef(0);
-  useEffect(
-    () => () => {
-      generation.current += 1;
-    },
-    [],
-  );
-
-  async function startPlanning() {
+  const startPlanning = useCallback(async () => {
     const run = ++generation.current;
     setLoading(true);
     setError("");
@@ -58,7 +57,7 @@ export default function TripItinerary({ tripId }: { tripId: string }) {
       await api(`/api/v1/trips/${tripId}/plan`, {});
       if (generation.current !== run) return;
       setStatus("planning");
-      for (let attempt = 0; attempt < 90; attempt++) {
+      for (let attempt = 0; attempt < 180; attempt++) {
         const trip = await api<{ status: string; planning_error?: string }>(
           `/api/v1/trips/${tripId}`,
         );
@@ -89,7 +88,19 @@ export default function TripItinerary({ tripId }: { tripId: string }) {
     } finally {
       if (generation.current === run) setLoading(false);
     }
-  }
+  }, [tripId]);
+
+  useEffect(() => {
+    let active = true;
+    if (autoStart)
+      queueMicrotask(() => {
+        if (active) void startPlanning();
+      });
+    return () => {
+      active = false;
+      generation.current += 1;
+    };
+  }, [autoStart, startPlanning]);
 
   if (plan?.version === 2) return <ExpandedItinerary plan={plan} />;
   if (plan)

@@ -12,6 +12,8 @@ from urllib.request import Request, urlopen
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from app.day_planning import daily_plans
+
 
 class FlightPreferences(BaseModel):
     max_stops: int = Field(default=1, ge=0, le=2)
@@ -46,6 +48,10 @@ class TripOptions(BaseModel):
     child_ages: list[int] = Field(default_factory=list, max_length=19)
     rooms: int = Field(default=1, ge=1, le=20)
     accessibility: str = Field(default="", max_length=1000)
+    budget_basis: Literal["group", "per_person"] = "group"
+    spending_style: Literal["budget", "value", "upscale"] = "value"
+    budget_enforcement: Literal["target", "ceiling"] = "ceiling"
+    flight_preferences: FlightPreferences = Field(default_factory=FlightPreferences)
     budget_mode: Literal["strict", "flexible"] = "strict"
     maximum_budget: Decimal | None = Field(
         default=None, gt=0, max_digits=12, decimal_places=2
@@ -353,6 +359,11 @@ def propose_route(trip):
     base, extra = divmod(available, len(options.route))
     for i, stop in enumerate(options.route):
         stop.nights = base + (i < extra)
+    for stop in options.route:
+        if stop.flight_preferences is None:
+            stop.flight_preferences = options.flight_preferences.model_copy()
+    if options.return_flight_preferences is None:
+        options.return_flight_preferences = options.flight_preferences.model_copy()
     return {
         "options": options.model_dump(mode="json"),
         "assumptions": assumptions,
@@ -411,10 +422,39 @@ def validate_route(trip):
 def build_plan(trip, suggestions=None):
     options = validate_route(trip)
     people = options.adults + len(options.child_ages)
-    target = money(trip["budget"])
-    ceiling = money(
-        options.maximum_budget if options.budget_mode == "flexible" else target
-    )
+    entered = money(trip["budget"]) if trip.get("budget") is not None else None
+    multiplier = people if options.budget_basis == "per_person" else 1
+    target = entered * multiplier if entered is not None else None
+    ceiling = None
+    if options.budget_enforcement == "ceiling" and target is not None:
+        ceiling = (
+            money(options.maximum_budget) * multiplier
+            if options.budget_mode == "flexible"
+            else target
+        )
+    profile = {
+        "budget": {
+            "room": 75,
+            "food": 25,
+            "car": 45,
+            "activity": Decimal("0.6"),
+            "transport": Decimal("0.85"),
+        },
+        "value": {
+            "room": 110,
+            "food": 40,
+            "car": 65,
+            "activity": Decimal(1),
+            "transport": Decimal(1),
+        },
+        "upscale": {
+            "room": 220,
+            "food": 85,
+            "car": 110,
+            "activity": Decimal("1.75"),
+            "transport": Decimal("1.5"),
+        },
+    }[options.spending_style]
     days, legs, stays, destination_estimates = [], [], [], []
     cursor = date.fromisoformat(str(trip["start_date"]))
     previous = trip.get("origin")
@@ -447,10 +487,11 @@ def build_plan(trip, suggestions=None):
             )
             * (1 if mode == "drive" else people)
         )
+        estimate = money(estimate * profile["transport"])
         if mode == "drive":
             estimate *= math.ceil(people / 5)
         if mode == "flight":
-            prefs = prefs or FlightPreferences()
+            prefs = prefs or options.flight_preferences
         query = f"{origin} to {destination} {depart} {people} travelers {mode}"
         if prefs and mode == "flight":
             query += f" maximum {prefs.max_stops} stops"
@@ -486,7 +527,7 @@ def build_plan(trip, suggestions=None):
                 stop.mode,
                 cursor,
                 arrival,
-                stop.flight_preferences,
+                stop.flight_preferences or options.flight_preferences,
             )
         while cursor < arrival:
             days.append(
@@ -504,10 +545,10 @@ def build_plan(trip, suggestions=None):
         area = advice.get("area", "Central area near public transit")
         lodging_query = {
             "hotel": "hotels",
-            "apartment": "apartments Airbnb",
-            "either": "hotels apartments Airbnb",
+            "apartment": "vacation rentals Airbnb",
+            "either": "hotels vacation rentals Airbnb",
         }[options.lodging]
-        stay_cost = money(110 * stop.nights * options.rooms)
+        stay_cost = money(profile["room"] * stop.nights * options.rooms)
         costs["lodging"] += stay_cost
         stays.append(
             {
@@ -524,91 +565,49 @@ def build_plan(trip, suggestions=None):
                 "criteria": "Allowance assumes up to 4 guests per room; confirm actual capacity. Compare recent reviews, total fees, transit access and distance to activities. Confirm room capacity and accessibility directly.",
             }
         )
-        choices = advice.get("activities", [])
         activity_before = costs["activities"]
-        for offset in range(stop.nights):
-            light = offset == 0
-            count = (
-                1 if light else {"relaxed": 1, "balanced": 2, "busy": 3}[options.pace]
-            )
+        arrival_day = not (index == 0 and options.journey == "already_there")
+        outlines = daily_plans(
+            stop.location, stop.nights, options.pace, arrival_day, advice, options.notes
+        )
+        for offset, outline in enumerate(outlines):
             activities = []
-            for n in range(count):
-                item = choices[(offset * 3 + n) % len(choices)] if choices else None
-                category = (
-                    trip.get("preferences", ["culture"])[0]
-                    if trip.get("preferences")
-                    else "culture"
-                )
-                if light:
-                    item = None
-                name = (
-                    item["name"]
-                    if item
-                    else (
-                        "Easy neighborhood walk and local meal"
-                        if light
-                        else f"Explore {category.lower()} around {area}"
-                    )
-                )
+            for n, item in enumerate(outline["activities"]):
                 price = money(
-                    0 if light else item.get("estimated_price", 15) if item else 15
+                    money(item.get("estimated_price", 0)) * profile["activity"]
                 )
                 costs["activities"] += price * people
                 activities.append(
                     {
                         "id": f"{index}-{offset}-{n}",
-                        "name": name,
-                        "category": item.get("category", category)
-                        if item
-                        else category,
-                        "area": area,
+                        "name": item["name"],
+                        "category": item.get("category", "culture"),
+                        "area": item.get("area", outline["area"]),
                         "price_per_person": str(price),
-                        "duration_hours": 1 if light else 2,
-                        "search_url": search_link(f"{stop.location} {name}"),
+                        "duration_minutes": item["duration_minutes"],
+                        "duration_hours": round(item["duration_minutes"] / 60, 2),
+                        "travel_minutes": item.get("travel_minutes", 0),
+                        "search_url": item.get("source_url")
+                        or search_link(f"{stop.location} {item['name']}"),
                     }
                 )
-            day_area = area
-            excursion = advice.get("day_trip")
-            if (
-                offset == 2
-                and stop.nights >= 4
-                and options.pace != "relaxed"
-                and excursion
-            ):
-                # Replace the day's local options, including their cost, with one excursion.
-                costs["activities"] -= sum(
-                    money(a["price_per_person"]) * people for a in activities
-                )
-                price = money(excursion["estimated_price"])
-                costs["activities"] += price * people
-                day_area = excursion["area"]
-                activities = [
-                    {
-                        "id": f"{index}-day-trip",
-                        "name": excursion["name"],
-                        "category": "day_trip",
-                        "area": day_area,
-                        "price_per_person": str(price),
-                        "duration_hours": 8,
-                        "travel_hours": excursion["travel_hours"],
-                        "search_url": search_link(
-                            f"{stop.location} {excursion['name']} transport"
-                        ),
-                    }
-                ]
             days.append(
                 {
                     "date": str(cursor),
                     "location": stop.location,
-                    "area": day_area,
-                    "kind": "arrival" if light else "full",
+                    "area": outline["area"],
+                    "title": outline["title"],
+                    "kind": outline["kind"],
                     "activities": activities,
+                    "travel_minutes": outline.get("travel_minutes", 0),
+                    "estimated_minutes": outline.get("estimated_minutes"),
+                    "needs_personalization": outline.get("unfilled", False),
                     "rain_alternative": {
-                        "name": advice.get(
-                            "rain", f"Find an indoor museum or café around {area}"
+                        "name": outline.get(
+                            "rain", f"An indoor exhibition around {outline['area']}"
                         ),
                         "search_url": search_link(
-                            f"{stop.location} {area} indoor museums cafés"
+                            f"{stop.location} {outline['area']} indoor museums"
                         ),
                         "excluded_from_total": True,
                     },
@@ -620,12 +619,12 @@ def build_plan(trip, suggestions=None):
                 "location": stop.location,
                 "lodging": str(stay_cost),
                 "activities": str(costs["activities"] - activity_before),
-                "food": str(money(40 * people * stop.nights)),
+                "food": str(money(profile["food"] * people * stop.nights)),
                 "subtotal": str(
                     stay_cost
                     + costs["activities"]
                     - activity_before
-                    + money(40 * people * stop.nights)
+                    + money(profile["food"] * people * stop.nights)
                 ),
             }
         )
@@ -641,7 +640,7 @@ def build_plan(trip, suggestions=None):
             options.return_mode,
             cursor,
             end_date,
-            options.return_flight_preferences,
+            options.return_flight_preferences or options.flight_preferences,
         )
     while cursor <= end_date:
         days.append(
@@ -656,11 +655,11 @@ def build_plan(trip, suggestions=None):
             }
         )
         cursor += timedelta(days=1)
-    costs["food"] = money(40 * people * len(days))
+    costs["food"] = money(profile["food"] * people * len(days))
     car = None
     car_searches = []
     if options.rental_car:
-        costs["car"] = money(65 * len(days) * math.ceil(people / 5))
+        costs["car"] = money(profile["car"] * len(days) * math.ceil(people / 5))
         car_searches = [
             {
                 "location": stay["location"],
@@ -681,12 +680,13 @@ def build_plan(trip, suggestions=None):
     subtotal = sum(costs.values())
     contingency = money(subtotal * Decimal("0.15"))
     total = subtotal + contingency
-    if total > ceiling:
+    if ceiling is not None and total > ceiling:
         raise ValueError(
             f"Estimated trip cost ${total} exceeds your ${ceiling} ceiling. Increase the budget, shorten the trip, reduce rooms or remove a stop."
         )
     return {
         "version": 2,
+        "travelers": people,
         "trip_id": trip["id"],
         "data_source": "planning_estimates",
         "currency": "USD",
@@ -698,16 +698,31 @@ def build_plan(trip, suggestions=None):
         "days": days,
         "budget": {
             **{k: str(money(v)) for k, v in costs.items()},
-            "target": str(target),
-            "limit": str(ceiling),
+            "target": str(target) if target is not None else None,
+            "limit": str(ceiling) if ceiling is not None else None,
+            "entered_amount": str(entered) if entered is not None else None,
+            "basis": options.budget_basis,
+            "spending_style": options.spending_style,
+            "enforcement": options.budget_enforcement,
+            "per_person_total": str(money(total / people)),
+            "per_person_above_target": str(
+                money(max(Decimal(0), total - target) / people)
+            )
+            if target is not None
+            else None,
             "contingency": str(contingency),
             "total": str(total),
-            "remaining": str(ceiling - total),
-            "above_target": str(max(Decimal(0), total - target)),
+            "remaining": str((ceiling if ceiling is not None else target) - total)
+            if target is not None
+            else None,
+            "above_target": str(max(Decimal(0), total - target))
+            if target is not None
+            else None,
         },
         "assumptions": [
             "Illustrative USD estimates, not quotes. Confirm all prices, schedules, opening hours, reviews, routes and accessibility before booking.",
-            "Stays assume $110 per room per night; food $40 per traveler per day; contingency 15%. Activities are suggestions, not reservations.",
+            f"{options.spending_style.capitalize()} style assumes ${profile['room']} per room per night and ${profile['food']} for food per traveler per day, with 15% contingency. Activities are suggestions, not reservations.",
+            "Per-person estimates split shared costs evenly across all travelers, including children. Actual individual spending can differ.",
             "Time windows are local to departure/arrival airports. Confirm flight restrictions on the booking site.",
             "Rain alternatives replace activities and are excluded from totals.",
             "AI location suggestions are unverified; check walking distances and transport locally.",

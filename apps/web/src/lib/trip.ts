@@ -23,6 +23,10 @@ export type Options = {
   child_ages: number[];
   rooms: number;
   accessibility: string;
+  budget_basis?: "per_person" | "group";
+  spending_style?: "budget" | "value" | "upscale";
+  budget_enforcement?: "target" | "ceiling";
+  flight_preferences?: FlightPreferences;
   budget_mode: "strict" | "flexible";
   maximum_budget: number | string | null;
   pace: "relaxed" | "balanced" | "busy";
@@ -35,7 +39,7 @@ export type TripForm = {
   start_date: string;
   end_date: string;
   travelers: number;
-  budget: number;
+  budget: number | null;
   preferences: string[];
   options: Options;
 };

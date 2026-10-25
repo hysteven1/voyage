@@ -13,6 +13,7 @@ with workflow.unsafe.imports_passed_through():
         update_trip_status,
     )
     from app.ai import generate_fallback_narrative, personalize_itinerary
+    from app.booking import select_travel_options
     from app.places import suggest_places
     from app.providers import (
         search_activities,
@@ -49,7 +50,7 @@ class PlanTripWorkflow:
             )
 
             if trip.get("options"):
-                suggestions = await execute(suggest_places, trip, timeout=35)
+                suggestions = await execute(suggest_places, trip, timeout=90)
                 plan = await execute(
                     build_itinerary, {"trip": trip, "suggestions": suggestions}
                 )
@@ -69,6 +70,9 @@ class PlanTripWorkflow:
                         "activities": activities,
                     },
                 )
+
+            if trip.get("options") and workflow.patched("live-travel-selection-v1"):
+                plan = await execute(select_travel_options, {"trip": trip, "plan": plan}, timeout=300)
 
             # Personalization is optional enrichment.
             # A failure must not invalidate the budget-safe plan.

@@ -16,6 +16,7 @@ export default function LocationAutocomplete({
   label,
   value,
   required,
+  error = false,
   placeholder,
   citiesOnly = false,
   onChange,
@@ -23,6 +24,7 @@ export default function LocationAutocomplete({
   label: string;
   value: string;
   required?: boolean;
+  error?: boolean;
   placeholder?: string;
   citiesOnly?: boolean;
   onChange: (value: string) => void;
@@ -66,9 +68,8 @@ export default function LocationAutocomplete({
     <Autocomplete<LocationSuggestion, false, false, true>
       fullWidth
       freeSolo
-      autoComplete
       autoHighlight
-      selectOnFocus
+      selectOnFocus={false}
       clearOnBlur={false}
       handleHomeEndKeys
       open={open}
@@ -142,14 +143,13 @@ export default function LocationAutocomplete({
         <TextField
           {...params}
           required={required}
+          error={error}
           label={label}
           placeholder={placeholder}
           helperText={
             result.failed && result.query === query
               ? "Suggestions unavailable. You can still enter a location."
-              : citiesOnly
-                ? "Search or enter a city."
-                : "Search or enter a city or country."
+              : undefined
           }
           slotProps={{
             ...params.slotProps,

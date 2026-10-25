@@ -44,26 +44,6 @@ export default function TravelScene() {
         d="M43 285V242M29 263L43 233L58 263H29ZM33 274L43 253L55 274H33Z"
         fill="#234f41"
       />
-      <rect
-        x="25"
-        y="24"
-        width="111"
-        height="28"
-        rx="14"
-        fill="#fffdf6"
-        fillOpacity=".9"
-      />
-      <circle cx="42" cy="38" r="4" fill="#d3764f" />
-      <text
-        x="54"
-        y="42"
-        fill="#355849"
-        fontFamily="sans-serif"
-        fontSize="10"
-        letterSpacing="1"
-      >
-        A LITTLE FURTHER
-      </text>
     </svg>
   );
 }

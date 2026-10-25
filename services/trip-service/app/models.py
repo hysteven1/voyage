@@ -25,9 +25,7 @@ class Trip(Base):
 
     travelers: Mapped[int] = mapped_column(Integer)
 
-    budget: Mapped[Decimal] = mapped_column(
-        Numeric(12, 2)
-    )
+    budget: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)
 
     preferences: Mapped[list[str]] = mapped_column(
         JSON,

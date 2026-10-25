@@ -17,17 +17,17 @@ itineraries based on budgets, dates, and preferences.
 - Helm / Argo CD
 ## Flexible trip planner
 
-The web app guides travelers through journey details, preferences, and an editable
-route review. Expanded trips use `options` on the existing trip API. Older requests
+The web app has two steps: journey details (including flight preferences) and
+travel style. It proposes the route, saves the trip and starts planning automatically. Expanded trips use `options` on the existing trip API. Older requests
 with `origin`, `destination`, dates, travelers, budget and preferences remain valid;
 existing saved itineraries retain their original renderer and planning behavior.
 
 - `POST /api/v1/trips/route-proposal` accepts the trip fields plus `options.route`
   (a list of locations). It returns suggested order, nights, travel modes, transit
   nights, assumptions and the proposal source. It does not save a trip.
-- Travelers edit the proposal, then `POST /api/v1/trips` saves the approved route.
-  Stays plus transit nights must equal the trip's date window. Expanded trips are
-  checked against a baseline estimated budget before they are saved.
+- The web app passes the proposal to `POST /api/v1/trips` to save the route.
+  Stays plus transit nights must equal the trip's date window. Expanded trips can omit the budget amount. New UI amounts are soft targets;
+  older API requests retain their existing ceiling behavior.
 - The existing `POST /api/v1/trips/{id}/plan` generates and atomically persists the
   plan. Version 2 itineraries contain travel legs, stays, grouped daily suggestions,
   rainy-day alternatives, rental searches and group/destination cost estimates.
@@ -46,13 +46,16 @@ AI suggestions are not a verified map, timetable, review feed, or availability f
 Notes are advisory; conflicts surfaced by AI require correction. Traveler review
 and booking-site confirmation remain necessary, especially without AI configured.
 
-All costs are illustrative USD estimates for the whole group, including children.
-Defaults are $110 per room/night (up to four guests per room as a planning allowance),
-$40 per traveler/day for food, $65 per car/day, and 15% contingency. Transport uses
+Costs are illustrative USD estimates, including children. Travelers choose a
+per-person or whole-group target, or leave the amount blank. Per-person estimates
+split shared costs evenly; individual spending can differ. Spending style defaults
+to good value, with budget-conscious and upscale alternatives. Styles adjust room,
+food, transport and activity allowances; good-value defaults are $110 per room/night
+(up to four guests per room as an allowance), $40 per traveler/day for food,
+$65 per car/day, and 15% contingency. Transport uses
 rough distance-based estimates when coordinates are known, otherwise fallback
-allowances. Optional rainy-day swaps are excluded from the total. Flexible budgets
-require an explicit maximum; strict budgets and flexible maxima are never silently
-exceeded. Booking links are searches, not reservations or guaranteed filtered results.
+allowances. Optional rainy-day swaps are excluded from the total. New UI targets can be exceeded with a clear notice in the itinerary. Existing
+strict/flexible API ceilings remain supported and are never silently exceeded. Booking links are searches, not reservations or guaranteed filtered results.
 Accessibility, actual room/vehicle capacity, child fares, fees and travel restrictions
 must be checked with providers. No live weather or travel search integration is used.
 
@@ -132,6 +135,36 @@ npm run build
 ```
 
 The browser tests exercise desktop and mobile forms, real autocomplete searches,
-calendar selection, validation, and mocked route-review/save requests. They do not
+calendar selection, validation, and mocked proposal/save/generate requests. They do not
 call live planning services or create trips in PostgreSQL. The frontend now uses
 system fonts, so Google Fonts access is not required to build or display the app.
+
+
+### Latest form simplification
+
+The header is a wordmark and tagline; the sidebar shows the route and dates live,
+then company, pace and interests on the second step. It does not show a default
+budget. Already-there trips hide the origin input and use “Where”. Filled locations
+do not repeat search guidance. Date selection highlights both endpoints and every
+day in between, including when the selection is reopened across months.
+
+Flight preferences are collected once on the first step and applied to all flight
+searches. The separate “Make it yours” route screen has been removed. Interests
+are optional; relaxation is represented by the pace choice rather than an interest.
+The internal lodging value `apartment` is retained for API compatibility and shown
+as “Vacation rentals”.
+
+Optional budget amounts require the new nullable-budget migration. To update Docker:
+
+```bash
+cd ~/projects/voyage
+docker compose build api worker web migrate
+docker compose run --rm migrate
+docker compose up -d api worker web
+```
+
+The new API options are `budget_basis` (`per_person`/`group`), `spending_style`
+(`budget`/`value`/`upscale`), and `budget_enforcement` (`target`/`ceiling`). Existing
+API requests default to group amounts and ceiling enforcement; the new UI sends
+per-person targets by default, without requiring an amount. No migration rewrites
+existing budgets or itineraries.

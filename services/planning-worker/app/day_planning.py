@@ -292,7 +292,16 @@ def day_trip_limit(full_days):
     return min(2, max(0, full_days // 4))
 
 
-def daily_plans(location, nights, pace, arrival, advice=None, notes="", interests=None):
+def daily_plans(
+    location,
+    nights,
+    pace,
+    arrival,
+    advice=None,
+    notes="",
+    interests=None,
+    excursion_limit=None,
+):
     advice = advice or {}
     ideas = deepcopy(advice.get("days") or [])
     if not ideas and advice.get("activities"):
@@ -320,7 +329,8 @@ def daily_plans(location, nights, pace, arrival, advice=None, notes="", interest
     seen = set()
     result = []
     excursions = 0
-    excursion_limit = day_trip_limit(nights - int(arrival))
+    if excursion_limit is None:
+        excursion_limit = day_trip_limit(nights - int(arrival))
     if arrival:
         result.append(
             {

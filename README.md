@@ -41,9 +41,9 @@ defaults to `gpt-6.1-sol` for route and itinerary reasoning; `OPENAI_MODEL` rema
 `gpt-4o-mini` by default for short narrative copy. Both are wired through Compose. The API uses structured route suggestions; the worker
 suggests varied daily clusters across each city, with visit and transfer durations,
 and optional full-day excursions. Each destination is generated independently, with
-its own dates and request timeout; one unavailable city does not discard the others.
-With no key or an unavailable model, route estimates remain available but activity
-days are explicitly incomplete. Repetitive generic activities are never substituted
+its own dates and batches of at most three days. Itinerary generation requires an API
+key; provider failures trigger a recovery-model attempt and Temporal retries rather
+than successfully persisting missing activity days. Repetitive generic activities are never substituted
 for actual recommendations. Photo stops such as Hachiko get minutes,
 while theme parks and distant excursions occupy their own days. Restaurants and
 food interests are excluded; meal allowances remain in the cost estimate. Offline country-to-city and route geography coverage
@@ -288,16 +288,20 @@ from a ChatGPT/Codex subscription. See the official
 [GPT-6.1 Sol model documentation](https://developers.openai.com/api/docs/models/gpt-6.1-sol).
 Use `OPENAI_PLANNING_MODEL` to choose another compatible model. Reasoning options
 are sent to GPT-5/GPT-6 models; a `gpt-4o-mini` override omits them. Itinerary requests
-use medium reasoning, while the shorter route proposal uses low reasoning.
+use low reasoning to reduce response latency, as does the shorter route proposal.
 
 
 ### Multi-city failure handling
 
 A three-city trip previously used one large AI response: a timeout discarded every
 city and triggered repetitive generic templates. Cities now run separately with up
-to four concurrent requests. Valid cities are retained; failed destinations are
-listed in `incomplete_destinations`. Their activity lists contain no invented visits,
-prices or durations. The UI warns that the itinerary and activity costs are incomplete
-and labels the budget a partial estimate. Users can edit their details to generate a
-new plan; existing completed itineraries are preserved. Route titles are joined from
+to four concurrent requests, each requesting at most three days at a time. Previous
+attractions are supplied to subsequent batches to prevent repeats. The primary model
+uses low reasoning with a 90-second request timeout. Provider or structured-output
+failures get a 60-second recovery attempt using `OPENAI_RECOVERY_MODEL` (default
+`gpt-4o-mini`). Failed optional quality repairs preserve the original recommendations.
+Unresolved missing days raise an activity error so Temporal retries planning; completion
+also rejects incomplete plans before any database write. This cannot guarantee an
+external provider is always available, but failures are no longer saved as completed
+empty itineraries. Existing completed itineraries are preserved. Route titles are joined from
 structured locations with ` → ` instead of trusting AI-generated separators.

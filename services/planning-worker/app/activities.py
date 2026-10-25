@@ -158,6 +158,12 @@ def complete_trip(data: dict) -> None:
     with log_activity(data.get("trip_id"), "Completing trip"):
         trip_id = data["trip_id"]
         plan = data["plan"]
+        if plan.get("incomplete_destinations") or any(
+            day.get("needs_personalization") for day in plan.get("days", [])
+        ):
+            raise ApplicationError(
+                "Activity planning did not finish. Please retry planning."
+            )
 
         with engine.begin() as connection:
             connection.execute(

@@ -5,6 +5,7 @@ import logging
 import os
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, timedelta
+from time import monotonic
 
 from openai import OpenAI
 from pydantic import BaseModel, ConfigDict, Field
@@ -87,7 +88,12 @@ def quality_issues(advice, requests, pace):
         if city is None or pace != "busy":
             continue
         planned = daily_plans(
-            city.location, request["day_plan_count"], pace, False, city.model_dump()
+            city.location,
+            request["day_plan_count"],
+            pace,
+            False,
+            city.model_dump(),
+            excursion_limit=request["day_trip_limit"],
         )
         for day in planned:
             if (
@@ -105,9 +111,10 @@ def suggest_destination(trip: dict, requests: list[dict]) -> dict:
     logger.info("Suggesting varied day plans", extra={"trip_id": trip["id"]})
     if not os.getenv("OPENAI_API_KEY"):
         return {}
+    deadline = monotonic() + 180
     try:
         client = OpenAI(
-            api_key=os.environ["OPENAI_API_KEY"], timeout=75.0, max_retries=0
+            api_key=os.environ["OPENAI_API_KEY"], timeout=90.0, max_retries=0
         )
         messages = [
             {
@@ -115,6 +122,8 @@ def suggest_destination(trip: dict, requests: list[dict]) -> dict:
                 "content": (
                     "Build varied, realistic DAY PLANS across each city, not one neighborhood for the whole trip. "
                     "Return only the exact locations in city_requests, even when trip.route contains other destinations. "
+                    "This can be one batch of a longer stay. Never repeat attractions listed in already_planned. "
+                    "Keep reasons concise and return only the requested days. "
                     "Use city_requests arrival_date and departure_date for the city window; the whole trip is context. "
                     "City.area is a convenient rail-connected area to stay. "
                     "First select a ranked shortlist of the city's top must-see experiences for this travel month, "
@@ -165,13 +174,35 @@ def suggest_destination(trip: dict, requests: list[dict]) -> dict:
         ]
 
         def generate(input_messages=None, timeout=None):
-            return client.responses.parse(
-                **planning_model_options(),
-                input=input_messages or messages,
-                **({"timeout": timeout} if timeout else {}),
-                text_format=PlaceAdvice,
-                store=False,
-            ).output_parsed
+            remaining = deadline - monotonic()
+            if remaining <= 0:
+                raise TimeoutError("Day recommendation request budget exhausted")
+            arguments = {
+                "input": input_messages or messages,
+                "timeout": min(timeout or 90.0, remaining),
+                "text_format": PlaceAdvice,
+                "store": False,
+            }
+            try:
+                result = client.responses.parse(
+                    **planning_model_options("low"), **arguments
+                ).output_parsed
+                if result is None:
+                    raise ValueError("No structured recommendations returned")
+                return result
+            except Exception as exc:
+                logger.warning(
+                    "Retrying day recommendations with recovery model (%s)",
+                    type(exc).__name__,
+                    extra={"trip_id": trip["id"]},
+                )
+                remaining = deadline - monotonic()
+                if remaining <= 0:
+                    raise
+                return client.responses.parse(
+                    model=os.getenv("OPENAI_RECOVERY_MODEL", "gpt-4o-mini"),
+                    **{**arguments, "timeout": min(60.0, remaining)},
+                ).output_parsed
 
         def generate_grounded(input_messages=None, timeout=None):
             result = generate(input_messages, timeout)
@@ -202,9 +233,16 @@ def suggest_destination(trip: dict, requests: list[dict]) -> dict:
                         },
                     ]
                 )
-                repaired = generate_grounded(timeout=45.0)
-                if repaired is not None:
-                    advice = repaired
+                try:
+                    repaired = generate_grounded(timeout=45.0)
+                    if repaired is not None:
+                        advice = repaired
+                except Exception as exc:  # noqa: BLE001 - optional quality repair must preserve usable recommendations.
+                    logger.warning(
+                        "Keeping original recommendations after repair failed (%s)",
+                        type(exc).__name__,
+                        extra={"trip_id": trip["id"]},
+                    )
         if advice is not None and not advice.conflicts:
             # Removing an excursion or duplicate must not leave a missing day.
             # Ask for only the gaps, not another expensive whole-plan rewrite.
@@ -222,6 +260,7 @@ def suggest_destination(trip: dict, requests: list[dict]) -> dict:
                     trip["options"]["pace"],
                     False,
                     city.model_dump(),
+                    excursion_limit=request["day_trip_limit"],
                 )
                 valid_titles = {
                     d["title"]
@@ -339,7 +378,10 @@ def suggest_destination(trip: dict, requests: list[dict]) -> dict:
 def suggest_places(trip: dict) -> dict:
     """Generate cities independently so a timeout cannot erase another city's ideas."""
     if not os.getenv("OPENAI_API_KEY"):
-        return {}
+        raise ApplicationError(
+            "Activity planning is not configured. Set OPENAI_API_KEY on the worker.",
+            non_retryable=True,
+        )
     cursor = date.fromisoformat(str(trip["start_date"]))
     requests = []
     for index, stop in enumerate(trip["options"]["route"]):
@@ -359,26 +401,55 @@ def suggest_places(trip: dict) -> dict:
         cursor = departure
 
     def generate(request):
-        try:
-            result = suggest_destination(trip, [request])
-        except ApplicationError:
-            raise
-        except Exception as exc:  # noqa: BLE001 - one unavailable destination must not erase the others.
-            logger.warning(
-                "Destination suggestions unavailable (%s)",
-                type(exc).__name__,
-                extra={"trip_id": trip["id"]},
+        location = request["location"]
+        combined = {"location": location, "days": [], "highlights": [], "day_trips": []}
+        while len(combined["days"]) < request["day_plan_count"]:
+            remaining = request["day_plan_count"] - len(combined["days"])
+            excursions = sum(bool(day.get("day_trip")) for day in combined["days"])
+            batch = {
+                **request,
+                "day_plan_count": min(3, remaining),
+                "day_trip_limit": max(0, request["day_trip_limit"] - excursions),
+            }
+            batch_trip = {
+                **trip,
+                "already_planned": [
+                    item["name"]
+                    for day in combined["days"]
+                    for item in day["activities"]
+                ],
+            }
+            result = suggest_destination(batch_trip, [batch]).get(location)
+            if not result or not result.get("days"):
+                raise ApplicationError(
+                    f"Activity recommendations are temporarily unavailable for {location}. Retrying planning."
+                )
+            # Normalize and deduplicate before accepting the batch. A failed
+            # provider request must never become a successfully saved empty plan.
+            candidates = {**result, "days": combined["days"] + result["days"]}
+            planned = daily_plans(
+                location,
+                len(combined["days"]) + batch["day_plan_count"],
+                trip["options"]["pace"],
+                False,
+                candidates,
+                excursion_limit=request["day_trip_limit"],
             )
-            result = {}
-        return request["location"], result.get(
-            request["location"],
-            {
-                "days": [],
-                "highlights": [],
-                "day_trips": [],
-                "generation_status": "unavailable",
-            },
-        )
+            previous = len(combined["days"])
+            combined["days"] = [day for day in planned if not day.get("unfilled")][
+                : request["day_plan_count"]
+            ]
+            if len(combined["days"]) <= previous:
+                raise ApplicationError(
+                    f"Activity planning needs another attempt for {location}."
+                )
+            combined["area"] = result.get("area", location)
+            if not combined["highlights"]:
+                combined["highlights"] = result.get("highlights", [])
+            if not combined["day_trips"]:
+                combined["day_trips"] = result.get("day_trips", [])
+            combined["quality_notes"] = result.get("quality_notes", [])
+        return location, combined
 
     with ThreadPoolExecutor(max_workers=min(4, len(requests))) as executor:
         return dict(executor.map(generate, requests))

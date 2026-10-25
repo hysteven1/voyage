@@ -14,6 +14,7 @@ import {
 import ExpandMoreRounded from "@mui/icons-material/ExpandMoreRounded";
 import NorthEastRounded from "@mui/icons-material/NorthEastRounded";
 import FlightTakeoffRounded from "@mui/icons-material/FlightTakeoffRounded";
+import TrainRounded from "@mui/icons-material/TrainRounded";
 import HotelRounded from "@mui/icons-material/HotelRounded";
 import UmbrellaRounded from "@mui/icons-material/UmbrellaRounded";
 import type { FlightPreferences } from "@/lib/trip";
@@ -207,14 +208,6 @@ export default function ExpandedItinerary({ plan }: { plan: ExpandedPlan }) {
           explore. Confirm prices, availability, reviews, and accessibility
           before booking.
         </Typography>
-        {incomplete.length > 0 && (
-          <Alert severity="warning" sx={{ mt: 2 }}>
-            Activity recommendations could not be completed for{" "}
-            {incomplete.join(", ")}. Travel options are shown below, but the
-            itinerary and activity costs are incomplete. Use Edit trip details
-            to try a new plan.
-          </Alert>
-        )}
       </Paper>
       <Paper component="section" className="itinerary-panel">
         <Typography component="h3" className="itinerary-section-title">
@@ -349,7 +342,11 @@ export default function ExpandedItinerary({ plan }: { plan: ExpandedPlan }) {
                   spacing={1.2}
                   sx={{ alignItems: "center", mb: 1.5 }}
                 >
-                  <FlightTakeoffRounded color="primary" />
+                  {leg.mode === "train" ? (
+                    <TrainRounded color="primary" aria-label="Train" />
+                  ) : (
+                    <FlightTakeoffRounded color="primary" aria-label="Flight" />
+                  )}
                   <Typography
                     component="h4"
                     variant="subtitle1"

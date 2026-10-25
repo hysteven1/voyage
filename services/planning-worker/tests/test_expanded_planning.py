@@ -79,7 +79,8 @@ def advice():
 
 
 def test_optional_places_and_grouped_days(trip, monkeypatch):
-    assert places.suggest_places(trip) == {}
+    with pytest.raises(ApplicationError, match="not configured"):
+        places.suggest_places(trip)
     monkeypatch.setenv("OPENAI_API_KEY", "test-only")
     client = Mock()
     client.return_value.responses.parse.return_value = SimpleNamespace(
@@ -107,20 +108,16 @@ def test_invalid_or_failed_places_fall_back(trip, monkeypatch):
         "Provider unavailable"
     )
     monkeypatch.setattr(places, "OpenAI", client)
-    assert (
-        places.suggest_places(trip)["Paris, France"]["generation_status"]
-        == "unavailable"
-    )
+    with pytest.raises(ApplicationError, match="temporarily unavailable"):
+        places.suggest_places(trip)
     client.return_value.responses.parse.side_effect = None
     invalid = advice()
     invalid.cities[0].days[0].activities[0].duration_minutes = 1000
     client.return_value.responses.parse.return_value = SimpleNamespace(
         output_parsed=invalid
     )
-    assert (
-        places.suggest_places(trip)["Paris, France"]["generation_status"]
-        == "unavailable"
-    )
+    with pytest.raises(ApplicationError, match="temporarily unavailable"):
+        places.suggest_places(trip)
 
 
 def test_notes_conflicts_are_actionable(trip, monkeypatch):
@@ -196,7 +193,9 @@ def test_ai_repairs_missing_days_for_destinations_beyond_tokyo(trip, monkeypatch
         SimpleNamespace(output_parsed=advice()),
     ]
     monkeypatch.setattr(places, "OpenAI", client)
-    result = places.suggest_places(trip)
+    result = places.suggest_destination(
+        trip, [{"location": "Paris, France", "day_plan_count": 7, "day_trip_limit": 1}]
+    )
     assert len(result["Paris, France"]["days"]) == 7
     assert client.return_value.responses.parse.call_count == 2
     assert result["Paris, France"]["quality_notes"] == []
@@ -255,7 +254,9 @@ def test_extra_day_trip_is_replaced_with_a_full_city_day(trip, monkeypatch):
     ]
     monkeypatch.setenv("OPENAI_API_KEY", "test-only")
     monkeypatch.setattr(places, "OpenAI", client)
-    result = places.suggest_places(trip)
+    result = places.suggest_destination(
+        trip, [{"location": "Paris, France", "day_plan_count": 5, "day_trip_limit": 1}]
+    )
     plan = build_plan(trip, result)
     full_days = [day for day in plan["days"] if day["kind"] == "full"]
     assert len(full_days) == 5
@@ -288,9 +289,7 @@ def test_interests_are_optional_in_activity_planning(trip, monkeypatch, notes):
     assert result["Paris, France"]["days"]
 
 
-def test_multiple_destinations_keep_successful_cities_when_one_times_out(
-    trip, monkeypatch
-):
+def test_multiple_destinations_do_not_complete_when_one_times_out(trip, monkeypatch):
     trip.update(
         origin="Washington, United States",
         start_date="2026-12-06",
@@ -334,22 +333,43 @@ def test_multiple_destinations_keep_successful_cities_when_one_times_out(
         return {location: city}
 
     monkeypatch.setattr(places, "suggest_destination", generate)
-    result = places.suggest_places(trip)
-    assert result["Tokyo, Japan"]["days"]
-    assert result["Osaka, Japan"]["days"]
-    assert result["Kyoto, Japan"]["generation_status"] == "unavailable"
-    plan = build_plan(trip, result)
-    assert plan["incomplete_destinations"] == ["Kyoto, Japan"]
-    kyoto_days = [
-        d
-        for d in plan["days"]
-        if d["location"] == "Kyoto, Japan" and d["kind"] == "full"
+    with pytest.raises(TimeoutError):
+        places.suggest_places(trip)
+
+
+def test_timeout_recovers_using_faster_model(trip, monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "test-only")
+    client = Mock()
+    client.return_value.responses.parse.side_effect = [
+        TimeoutError("provider timeout"),
+        SimpleNamespace(output_parsed=advice()),
     ]
-    assert all(
-        d["activities"] == [] and d["estimated_minutes"] is None for d in kyoto_days
+    monkeypatch.setattr(places, "OpenAI", client)
+    result = places.suggest_destination(
+        trip, [{"location": "Paris, France", "day_plan_count": 7, "day_trip_limit": 1}]
     )
-    assert any(
-        d["activities"]
-        for d in plan["days"]
-        if d["location"] == "Osaka, Japan" and d["kind"] == "full"
-    )
+    assert len(result["Paris, France"]["days"]) == 7
+    calls = client.return_value.responses.parse.call_args_list
+    assert calls[0].kwargs["reasoning"]["effort"] == "low"
+    assert calls[1].kwargs["model"] == "gpt-4o-mini"
+    assert "reasoning" not in calls[1].kwargs
+
+
+def test_long_stay_uses_small_batches_without_repeating_attractions(trip, monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "test-only")
+    requests_seen = []
+
+    def generate(batch_trip, requests):
+        request = requests[0]
+        requests_seen.append(request)
+        offset = len(batch_trip["already_planned"])
+        city = advice().cities[0].model_dump()
+        city["days"] = city["days"][offset : offset + request["day_plan_count"]]
+        return {request["location"]: city}
+
+    monkeypatch.setattr(places, "suggest_destination", generate)
+    result = places.suggest_places(trip)
+    assert [r["day_plan_count"] for r in requests_seen] == [3, 3, 1]
+    plan = build_plan(trip, result)
+    assert not plan["incomplete_destinations"]
+    assert all(d["activities"] for d in plan["days"] if d["kind"] == "full")

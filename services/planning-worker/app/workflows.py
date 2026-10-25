@@ -53,7 +53,15 @@ class PlanTripWorkflow:
                 suggestions = await execute(
                     suggest_places,
                     trip,
-                    timeout=150
+                    timeout=30
+                    + 180
+                    * max(
+                        (
+                            (stop.get("nights", 1) + 2) // 3
+                            for stop in trip["options"].get("route", [])
+                        ),
+                        default=1,
+                    )
                     * max(1, (len(trip["options"].get("route", [])) + 3) // 4),
                 )
                 plan = await execute(

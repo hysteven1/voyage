@@ -826,7 +826,7 @@ test("refresh starts a new session without reopening previous trips", async ({
   expect(captured.starts).toBe(1);
 });
 
-test("partial city suggestions show an honest warning and a clean structured route title", async ({
+test("legacy partial suggestions keep a clean route title without the removed warning", async ({
   page,
 }) => {
   await page.getByRole("button", { name: /Already there/ }).click();
@@ -849,10 +849,8 @@ test("partial city suggestions show an honest warning and a clean structured rou
     }),
   ).toHaveCount(0);
   await expect(
-    page.getByRole("region", { name: "Your itinerary" }).getByRole("alert"),
-  ).toContainText(
-    "Activity recommendations could not be completed for Kyoto, Japan",
-  );
+    page.getByText(/Activity recommendations could not be completed for/),
+  ).toHaveCount(0);
   await expect(
     page.getByText("Partial trip estimate · USD", { exact: true }),
   ).toBeVisible();

@@ -3,6 +3,7 @@ import json
 from unittest.mock import MagicMock, Mock
 
 import pytest
+from temporalio.exceptions import ApplicationError
 
 from app import activities, workflows
 
@@ -33,6 +34,21 @@ def test_completion_uses_one_transaction(transaction):
     context.__exit__.assert_called_once_with(None, None, None)
 
 
+@pytest.mark.parametrize(
+    "plan",
+    [
+        {"incomplete_destinations": ["Kyoto, Japan"]},
+        {"days": [{"needs_personalization": True}]},
+    ],
+)
+def test_completion_rejects_missing_activity_days_before_writing(transaction, plan):
+    engine, _, connection = transaction
+    with pytest.raises(ApplicationError, match="did not finish"):
+        activities.complete_trip({"trip_id": "trip-id", "plan": plan})
+    engine.begin.assert_not_called()
+    connection.execute.assert_not_called()
+
+
 @pytest.mark.parametrize("failure", ["insert", "update", "missing_trip"])
 def test_completion_exits_transaction_with_error(transaction, failure):
     _, context, connection = transaction
@@ -53,7 +69,9 @@ def test_completion_exits_transaction_with_error(transaction, failure):
 
 
 @pytest.mark.parametrize("status_update_fails", [False, True])
-def test_persistence_failure_marks_failed_and_preserves_error(monkeypatch, status_update_fails):
+def test_persistence_failure_marks_failed_and_preserves_error(
+    monkeypatch, status_update_fails
+):
     failure = RuntimeError("Persistence failed")
     calls = []
 

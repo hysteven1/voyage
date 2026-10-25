@@ -78,6 +78,8 @@ def test_persistence_failure_marks_failed_and_preserves_error(monkeypatch, statu
     assert caught.value is failure
     fn, arg, options = calls[-1]
     assert fn is workflows.update_trip_status
-    assert arg == {"trip_id": "trip-id", "status": "failed"}
+    assert arg["trip_id"] == "trip-id"
+    assert arg["status"] == "failed"
+    assert "Try again" in arg["error"]
     assert options["start_to_close_timeout"].total_seconds() == 15
     assert options["retry_policy"].maximum_attempts == 3

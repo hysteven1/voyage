@@ -17,7 +17,7 @@ class Trip(Base):
         default=uuid.uuid4,
     )
 
-    origin: Mapped[str] = mapped_column(String(255))
+    origin: Mapped[str | None] = mapped_column(String(255), nullable=True)
     destination: Mapped[str] = mapped_column(String(255))
 
     start_date: Mapped[date] = mapped_column(Date)
@@ -33,6 +33,10 @@ class Trip(Base):
         JSON,
         default=list,
     )
+
+    options: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+
+    planning_error: Mapped[str | None] = mapped_column(String(1000), nullable=True)
 
     status: Mapped[str] = mapped_column(
         String(32),

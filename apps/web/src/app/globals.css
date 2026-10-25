@@ -1,40 +1,823 @@
+@layer theme, base, mui, components, utilities;
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #f7f6f1;
+  --foreground: #203b36;
+  --teal: #174e43;
 }
-
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --font-sans: "Segoe UI", Arial, sans-serif;
+  --font-mono: ui-monospace, monospace;
 }
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+* {
+  box-sizing: border-box;
 }
-
+html {
+  scroll-behavior: smooth;
+  scroll-padding-top: 24px;
+}
 body {
+  margin: 0;
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family:
+    "Segoe UI",
+    -apple-system,
+    BlinkMacSystemFont,
+    Arial,
+    sans-serif;
 }
-
-.input {
+a {
+  color: inherit;
+}
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+button {
+  cursor: pointer;
+}
+button:disabled {
+  cursor: default;
+}
+:focus-visible {
+  outline: 3px solid #ce8b60;
+  outline-offset: 4px;
+}
+.voyage-site {
+  max-width: 1600px;
+  margin: auto;
+}
+.site-header {
+  max-width: 1280px;
+  margin: auto;
+  padding: 28px 48px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 28px;
+  border-bottom: 1px solid #e3e6df;
+}
+.wordmark {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  text-decoration: none;
+  font-size: 31px;
+  font-weight: 750;
+  letter-spacing: -1.8px;
+  color: #174e43;
+}
+.brand-icon {
+  display: flex;
+  margin-right: 3px;
+}
+.brand-icon svg {
+  font-size: 32px;
+}
+.brand-dot {
+  color: #c57c54;
+  margin-left: -6px;
+}
+.site-header nav {
+  display: flex;
+  gap: 32px;
+  font-size: 14px;
+  font-weight: 600;
+}
+.site-header nav a {
+  text-decoration: none;
+}
+.site-header nav a:hover {
+  color: #af603d;
+}
+.header-note {
+  color: #758079;
+  font-size: 12px;
+}
+.hero {
+  text-align: center;
+  padding: 60px 24px 48px;
+}
+.hero-eyebrow,
+.section-eyebrow {
+  color: #718371;
+  font-size: 10px;
+  font-weight: 750;
+  letter-spacing: 2px;
+}
+.hero-eyebrow {
+  display: inline-flex;
+  gap: 9px;
+  align-items: center;
+}
+.hero-eyebrow span {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #c3835d;
+}
+.hero h1 {
+  font-weight: 500;
+  font-size: clamp(40px, 5.2vw, 68px);
+  letter-spacing: -3.4px;
+  line-height: 1.12;
+  margin: 20px 0;
+}
+.hero h1 em,
+.sidebar-content h2 em {
+  font-family: Georgia, "Times New Roman", serif;
+  font-weight: 400;
+  color: #407b60;
+}
+.hero p {
+  color: #778077;
+  font-size: 16px;
+  line-height: 1.8;
+  margin: 0;
+}
+.hero-tags {
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 24px;
+  margin-top: 24px;
+  font-size: 12px;
+  color: #5d7266;
+}
+.hero-tags span {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.hero-tags svg {
+  font-size: 15px;
+}
+.planner-layout {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 0 32px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 326px;
+  gap: 28px;
+  align-items: start;
+  scroll-margin-top: 28px;
+}
+.planner-main {
+  min-width: 0;
+}
+.planner-card.MuiPaper-root {
+  padding: 32px;
+  border-radius: 22px;
+  border: 1px solid #e3e7df;
+  box-shadow: 0 12px 42px #233d3210;
+}
+.planner-stepper .MuiStepLabel-label {
+  font-size: 11px;
+}
+.planner-stepper .MuiStepIcon-root {
+  font-size: 24px;
+}
+.form-heading {
+  margin-bottom: 30px;
+}
+.form-heading h2 {
+  font-size: 27px;
+  line-height: 1.2;
+  margin-top: 10px;
+}
+.form-heading p {
+  font-size: 14px;
+}
+.form-fields {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+}
+.form-section {
+  display: flex;
+  flex-direction: column;
+  gap: 17px;
+}
+.form-section h3 {
+  font-size: 14px;
+}
+.choice-grid {
+  display: grid;
+  gap: 10px;
+}
+.choice-grid.three,
+.field-grid.three {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.choice-grid.two,
+.field-grid.two {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.choice-card {
+  position: relative;
+  border: 1px solid #e0e6dd;
+  background: white;
+  border-radius: 13px;
+  padding: 19px 14px;
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  color: #35483c;
+  transition:
+    background 0.18s,
+    border-color 0.18s,
+    transform 0.18s;
+}
+.choice-card:hover {
+  background: #f7f9f4;
+  border-color: #9eb2a0;
+  transform: translateY(-1px);
+}
+.choice-card.selected {
+  border-color: #527b5e;
+  background: #f0f5ec;
+  box-shadow: inset 0 0 0 0.5px #527b5e;
+}
+.choice-card strong {
+  font-size: 12px;
+  font-weight: 650;
+}
+.choice-card > span:not(.choice-icon) {
+  font-size: 10px;
+  color: #7a877a;
+}
+.choice-icon {
+  display: flex;
+  color: #56785a;
+  margin-bottom: 8px;
+}
+.choice-icon svg {
+  font-size: 25px;
+}
+.choice-check {
+  position: absolute;
+  top: 11px;
+  right: 10px;
+  font-size: 15px !important;
+  color: #44734d;
+}
+.field-grid {
+  display: grid;
+  gap: 16px;
+}
+.destinations-list {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.destination-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+.destination-row > .MuiAutocomplete-root {
+  flex: 1;
+  min-width: 0;
+}
+.destination-row > .MuiIconButton-root {
+  margin-top: 8px;
+}
+.stop-number {
+  display: flex;
+  width: 29px;
+  height: 29px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  justify-content: center;
+  align-items: center;
+  background: #edf2e9;
+  color: #5e795b;
+  font-size: 10px;
+  font-weight: 700;
+  margin-top: 14px;
+}
+.field-label {
+  display: block;
+  margin-bottom: 9px !important;
+  color: #627366;
+}
+.date-trigger.MuiButton-root {
+  color: #445d4b;
+  border-color: #dce3db;
+  justify-content: flex-start;
+  text-align: left;
+  padding: 16px;
+  font-size: 14px;
+}
+.date-trigger .MuiButton-endIcon {
+  margin-left: auto;
+  font-size: 16px;
+}
+.date-trigger .MuiButton-startIcon {
+  margin-right: 12px;
+  color: #6e896c;
+}
+.form-footer {
+  border-top: 1px solid #edf0e9;
+  margin-top: 30px;
+  padding-top: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+.form-footer .MuiButton-contained {
+  font-size: 13px;
+}
+.counter-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.counter {
+  padding: 14px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid #e3e8df;
+  border-radius: 12px;
+}
+.counter-grid .counter {
+  flex-direction: column;
+  align-items: flex-start;
+}
+.counter strong {
+  display: block;
+  font-size: 13px;
+}
+.counter > div > span {
+  color: #87917f;
+  font-size: 11px;
+}
+.counter-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.counter-controls .MuiIconButton-root {
+  border: 1px solid #e1e6da;
+  width: 30px;
+  height: 30px;
+}
+.counter-controls .MuiIconButton-root.Mui-disabled {
+  opacity: 0.4;
+}
+.counter output {
+  min-width: 17px;
+  text-align: center;
+  font-size: 14px;
+}
+.route-card.MuiPaper-root {
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  border-radius: 16px;
+}
+.route-card-heading {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+.route-card-heading .stop-number {
+  margin-top: 0;
+}
+.route-card-heading h3 {
+  font-size: 16px;
+}
+.saved-card.MuiPaper-root {
+  border-radius: 20px;
+  padding: 32px;
+  border: 1px solid #e0e7dc;
+  margin-bottom: 24px;
+}
+.trip-sidebar {
+  position: sticky;
+  top: 28px;
+  border-radius: 22px;
+  background: #eef1e7;
+  overflow: hidden;
+}
+.travel-scene {
+  display: block;
   width: 100%;
-  border: 1px solid #334155;
-  border-radius: 0.75rem;
-  background: #020617;
-  padding: 0.75rem;
-  color: white;
-  outline: none;
+  height: auto;
 }
-
-.input:focus {
-  border-color: #38bdf8;
+.sidebar-content {
+  padding: 26px;
+}
+.sidebar-content h2 {
+  font-size: 33px;
+  line-height: 1.15;
+  font-weight: 500;
+  letter-spacing: -1px;
+  margin: 14px 0;
+}
+.sidebar-content p {
+  font-size: 13px;
+  line-height: 1.7;
+  color: #778371;
+  margin: 0;
+}
+.summary-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 13px;
+}
+.summary-icon {
+  color: #708667;
+  padding-top: 2px;
+}
+.summary-icon svg {
+  font-size: 20px;
+}
+.summary-row > div > span {
+  display: block;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: #84917c;
+  margin-bottom: 5px;
+}
+.summary-row strong {
+  font-size: 12px;
+  line-height: 1.6;
+  font-weight: 600;
+  display: block;
+  overflow-wrap: anywhere;
+}
+.sidebar-budget {
+  background: #e1e8d8;
+  padding: 20px;
+  margin-top: 28px;
+  border-radius: 13px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.sidebar-budget > span:first-child {
+  font-size: 9px;
+  letter-spacing: 1.6px;
+  color: #75866a;
+  font-weight: 700;
+}
+.sidebar-budget strong {
+  font-size: 30px;
+  line-height: 1.1;
+  letter-spacing: -1px;
+  font-weight: 550;
+}
+.sidebar-budget > span:last-child {
+  font-size: 10px;
+  color: #7b886e;
+}
+.sidebar-footnote {
+  padding: 0 26px 24px;
+  margin: 0;
+  font-size: 10px;
+  color: #839177;
+  line-height: 1.7;
+}
+.how-it-works {
+  max-width: 1200px;
+  margin: 80px auto 64px;
+  padding: 0 32px;
+  display: grid;
+  grid-template-columns: 1.5fr 1fr 1fr 1fr;
+  gap: 28px;
+}
+.how-it-works h2 {
+  font-weight: 500;
+  font-size: 26px;
+  line-height: 1.3;
+  letter-spacing: -0.9px;
+  margin: 12px 0;
+}
+.how-step > span {
+  color: #b38762;
+  font-size: 12px;
+}
+.how-step h3 {
+  font-size: 13px;
+  font-weight: 650;
+  margin: 14px 0 8px;
+}
+.how-step p {
+  font-size: 12px;
+  color: #85907f;
+  line-height: 1.8;
+  margin: 0;
+}
+.site-footer {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 26px 32px;
+  border-top: 1px solid #e1e6da;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+}
+.site-footer .wordmark {
+  font-size: 25px;
+}
+.site-footer p {
+  color: #899180;
+  font-size: 12px;
+}
+.site-footer > span {
+  font-size: 9px;
+  color: #8c9683;
+}
+/* Itinerary shares the same calm card system as the planner. */
+.itinerary-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+.itinerary-panel.MuiPaper-root {
+  padding: 26px;
+  border: 1px solid #e1e6dd;
+  border-radius: 18px;
+}
+.itinerary-section-title {
+  font-size: 18px !important;
+  font-weight: 650 !important;
+  margin-bottom: 16px !important;
+}
+.itinerary-budget {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 20px;
+}
+.itinerary-budget dt {
+  font-size: 11px;
+  color: #7b8876;
+  text-transform: capitalize;
+}
+.itinerary-budget dd {
+  margin: 6px 0 0;
+  font-size: 18px;
+  font-weight: 550;
+}
+.day-heading {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 14px;
+}
+.day-number {
+  flex-shrink: 0;
+  width: 40px;
+  height: 44px;
+  border: 1px solid #dce6d7;
+  border-radius: 10px;
+  background: #f3f6ed;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 1.2;
+}
+.day-number span {
+  font-size: 9px;
+  text-transform: uppercase;
+  color: #7c8b70;
+}
+.booking-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: #25654d;
+  font-size: 13px;
+  font-weight: 600;
+  text-decoration: none;
+}
+.booking-link:hover {
+  text-decoration: underline;
+}
+.activity-row {
+  padding: 14px 0;
+  border-bottom: 1px solid #edf0e8;
+}
+.activity-row:last-child {
+  border-bottom: 0;
+}
+@media (max-width: 1000px) {
+  .header-note {
+    display: none;
+  }
+  .planner-layout {
+    grid-template-columns: minmax(0, 1fr) 275px;
+    gap: 20px;
+    padding: 0 24px;
+  }
+  .planner-card.MuiPaper-root {
+    padding: 24px;
+  }
+  .sidebar-content {
+    padding: 22px;
+  }
+  .sidebar-content h2 {
+    font-size: 30px;
+  }
+  .choice-card {
+    padding: 16px 10px;
+  }
+  .choice-card > span:not(.choice-icon) {
+    font-size: 9px;
+  }
+  .how-it-works {
+    gap: 22px;
+    padding: 0 24px;
+  }
+  .counter-controls {
+    gap: 5px;
+  }
+}
+@media (max-width: 800px) {
+  .planner-layout {
+    grid-template-columns: minmax(0, 1fr);
+    max-width: 680px;
+  }
+  .trip-sidebar {
+    position: static;
+    display: none;
+  }
+  .hero {
+    padding-top: 44px;
+  }
+  .hero h1 {
+    letter-spacing: -2px;
+  }
+  .how-it-works {
+    max-width: 680px;
+    grid-template-columns: 1fr 1fr;
+    gap: 26px;
+    margin-top: 50px;
+  }
+  .site-header {
+    padding: 22px 24px;
+  }
+  .site-footer {
+    padding: 24px;
+    flex-wrap: wrap;
+  }
+  .site-footer > span {
+    flex-basis: 100%;
+  }
+}
+@media (max-width: 480px) {
+  .site-header {
+    padding: 18px 20px;
+  }
+  .site-header nav {
+    gap: 16px;
+    font-size: 12px;
+  }
+  .wordmark {
+    font-size: 27px;
+  }
+  .brand-icon svg {
+    font-size: 26px;
+  }
+  .hero {
+    padding: 36px 20px;
+  }
+  .hero h1 {
+    font-size: 39px;
+    letter-spacing: -2px;
+  }
+  .hero p {
+    font-size: 14px;
+  }
+  .desktop-break {
+    display: none;
+  }
+  .hero-tags {
+    gap: 9px 15px;
+    font-size: 10px;
+  }
+  .hero-eyebrow {
+    font-size: 8px;
+  }
+  .planner-layout {
+    padding: 0 12px;
+  }
+  .planner-card.MuiPaper-root {
+    padding: 23px 18px;
+    border-radius: 18px;
+  }
+  .form-heading h2 {
+    font-size: 25px;
+  }
+  .planner-stepper .MuiStepLabel-label {
+    font-size: 10px;
+  }
+  .choice-grid.three {
+    gap: 7px;
+  }
+  .choice-card {
+    padding: 16px 9px;
+  }
+  .choice-card strong {
+    font-size: 11px;
+  }
+  .choice-card > span:not(.choice-icon) {
+    font-size: 9px;
+    line-height: 1.4;
+  }
+  .choice-card .choice-check {
+    top: 7px;
+    right: 7px;
+    font-size: 12px !important;
+  }
+  .choice-icon svg {
+    font-size: 22px;
+  }
+  .field-grid.two,
+  .field-grid.three {
+    grid-template-columns: 1fr;
+  }
+  .counter-grid {
+    gap: 6px;
+  }
+  .counter-grid .counter {
+    padding: 12px 8px;
+  }
+  .counter-controls {
+    gap: 2px;
+  }
+  .counter-controls .MuiIconButton-root {
+    width: 26px;
+    height: 26px;
+  }
+  .counter > div > span {
+    font-size: 9px;
+  }
+  .form-footer {
+    flex-wrap: wrap;
+  }
+  .form-footer .MuiButton-contained {
+    margin-left: auto;
+  }
+  .form-footer .MuiTypography-caption {
+    display: none;
+  }
+  .date-trigger.MuiButton-root {
+    font-size: 12px;
+  }
+  .how-it-works {
+    grid-template-columns: 1fr;
+    margin-top: 45px;
+    gap: 24px;
+    padding: 0 24px;
+  }
+  .how-it-works h2 {
+    margin-bottom: 0;
+  }
+  .how-step {
+    border-top: 1px solid #e1e6da;
+    padding-top: 18px;
+  }
+  .site-footer p {
+    font-size: 10px;
+  }
+  .itinerary-panel.MuiPaper-root {
+    padding: 20px;
+  }
+  .itinerary-budget {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

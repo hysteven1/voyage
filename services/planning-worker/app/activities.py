@@ -11,6 +11,7 @@ from temporalio import activity
 from temporalio.exceptions import ApplicationError
 
 from app.optimizer import optimize_trip
+from app.planning import build_plan
 
 logger = logging.getLogger("voyage.activities")
 
@@ -30,6 +31,7 @@ load_dotenv()
 engine = create_engine(
     os.environ["DATABASE_URL"],
     pool_pre_ping=True,
+    hide_parameters=True,
 )
 
 
@@ -46,10 +48,16 @@ def update_trip_status(data: dict) -> None:
             result = connection.execute(
                 text("""
                     UPDATE trips
-                    SET status = :status
+                    SET status = :status, planning_error = :planning_error
                     WHERE id = :trip_id
                 """),
-                {"status": new_status, "trip_id": trip_id},
+                {
+                    "status": new_status,
+                    "trip_id": trip_id,
+                    "planning_error": data.get("error")
+                    if new_status == "failed"
+                    else None,
+                },
             )
 
             if result.rowcount != 1:
@@ -85,16 +93,20 @@ async def generate_sample_plan(trip_id: str) -> dict:
 def load_trip(trip_id: str) -> dict:
     with log_activity(trip_id, "Loading trip"):
         with engine.connect() as connection:
-            row = connection.execute(
-                text("""
+            row = (
+                connection.execute(
+                    text("""
                     SELECT id, origin, destination,
                            start_date, end_date, travelers,
-                           budget, preferences
+                           budget, preferences, options
                     FROM trips
                     WHERE id = :trip_id
                 """),
-                {"trip_id": uuid.UUID(trip_id)},
-            ).mappings().first()
+                    {"trip_id": uuid.UUID(trip_id)},
+                )
+                .mappings()
+                .first()
+            )
 
         if row is None:
             raise ApplicationError(
@@ -111,6 +123,7 @@ def load_trip(trip_id: str) -> dict:
             "travelers": row["travelers"],
             "budget": str(row["budget"]),
             "preferences": row["preferences"],
+            "options": row["options"],
         }
 
 
@@ -163,7 +176,7 @@ def complete_trip(data: dict) -> None:
             result = connection.execute(
                 text("""
                     UPDATE trips
-                    SET status = 'completed'
+                    SET status = 'completed', planning_error = NULL
                     WHERE id = CAST(:trip_id AS uuid)
                 """),
                 {"trip_id": trip_id},
@@ -177,6 +190,8 @@ def complete_trip(data: dict) -> None:
 def build_itinerary(data: dict) -> dict:
     with log_activity(data.get("trip", {}).get("id"), "Building itinerary"):
         try:
+            if data["trip"].get("options"):
+                return build_plan(data["trip"], data.get("suggestions"))
             return optimize_trip(
                 data["trip"],
                 data["flights"],

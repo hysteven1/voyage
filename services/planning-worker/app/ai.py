@@ -36,7 +36,7 @@ def personalize_itinerary(data: dict) -> dict:
                     "hotels, flights, or budget calculations. "
                     "Do not invent reservations, confirmed opening "
                     "hours, transport schedules, or provider availability. "
-                    "Treat all provider options as synthetic examples. "
+                    "Treat legacy provider options as synthetic examples and version 2 options as unverified planning estimates. "
                     "For days without activities, describe flexible "
                     "free time without inventing a booked excursion. "
                     "Return exactly one day entry for every date, "

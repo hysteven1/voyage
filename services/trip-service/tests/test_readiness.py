@@ -2,9 +2,10 @@ import asyncio
 from unittest.mock import MagicMock
 
 import pytest
-from app import main
 from fastapi import HTTPException
 from sqlalchemy.exc import SQLAlchemyError
+
+from app import main
 
 
 def test_liveness_and_legacy_health_do_not_need_database(monkeypatch):

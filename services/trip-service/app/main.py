@@ -17,6 +17,7 @@ from temporalio.exceptions import WorkflowAlreadyStartedError
 from app.database import engine, get_db
 from app.logging_config import configure_logging
 from app.models import Itinerary, Trip
+from app.planning import build_plan, propose_route, validate_route
 from app.schemas import TripCreate, TripResponse
 
 app = FastAPI(
@@ -109,6 +110,16 @@ async def readiness():
     }
 
 
+@app.post("/api/v1/trips/route-proposal")
+def route_proposal(payload: TripCreate):
+    if payload.options is None:
+        raise HTTPException(422, "Provide destinations and trip options")
+    try:
+        return propose_route(payload.model_dump(mode="json"))
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from None
+
+
 @app.post(
     "/api/v1/trips",
     response_model=TripResponse,
@@ -118,7 +129,16 @@ def create_trip(
     payload: TripCreate,
     db: Annotated[Session, Depends(get_db)],
 ):
-    trip = Trip(**payload.model_dump())
+    if payload.options:
+        try:
+            validate_route(payload.model_dump(mode="json"))
+            build_plan({**payload.model_dump(mode="json"), "id": "draft"})
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from None
+    values = payload.model_dump()
+    if payload.options:
+        values["options"] = payload.options.model_dump(mode="json")
+    trip = Trip(**values)
 
     db.add(trip)
     db.commit()

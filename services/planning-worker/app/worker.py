@@ -16,6 +16,7 @@ from app.activities import (
 )
 from app.ai import generate_fallback_narrative, personalize_itinerary
 from app.logging_config import configure_logging
+from app.places import suggest_places
 from app.providers import (
     search_activities,
     search_flights,
@@ -52,6 +53,7 @@ async def main():
                 generate_fallback_narrative,
                 save_itinerary,
                 complete_trip,
+                suggest_places,
             ],
             activity_executor=executor,
         )

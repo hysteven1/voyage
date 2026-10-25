@@ -1,258 +1,197 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import {
+  Alert,
+  Button,
+  CircularProgress,
+  Paper,
+  Stack,
+  Typography,
+} from "@mui/material";
+import AutoAwesomeRounded from "@mui/icons-material/AutoAwesomeRounded";
+import ExpandedItinerary, {
+  ExpandedPlan,
+} from "@/components/ExpandedItinerary";
+import { api } from "@/lib/trip";
 
-type Activity = {
-  id: string;
-  name: string;
-  category: string;
-  price_per_person: string;
-  duration_hours: number;
-};
-
-type DayNarrative = {
-  date: string;
-  description: string;
-  travel_tip: string;
-};
-
-type TripNarrative = {
-  title: string;
-  summary: string;
-  source: "openai" | "fallback";
-  days: DayNarrative[];
-};
-
-type Itinerary = {
-  narrative?: TripNarrative;
+type LegacyPlan = {
+  version?: 1;
+  narrative?: {
+    title: string;
+    summary: string;
+    days: { date: string; description: string; travel_tip: string }[];
+  };
   trip_id: string;
-  data_source: string;
-  currency: string;
-  flight: {
-    provider: string;
-    price: string;
-  };
-  hotel: {
-    name: string;
-    price_per_night: string;
-  };
+  flight: { provider: string; price: string };
+  hotel: { name: string; price_per_night: string };
   days: {
     date: string;
-    activities: Activity[];
+    activities: {
+      id: string;
+      name: string;
+      duration_hours: number;
+      price_per_person: string;
+    }[];
   }[];
-  budget: {
-    limit: string;
-    flight: string;
-    hotel: string;
-    activities: string;
-    total: string;
-    remaining: string;
-  };
+  budget: { total: string; remaining: string };
 };
 
-const API_URL =
-  process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
-
-export default function TripItinerary({
-  tripId,
-}: {
-  tripId: string;
-}) {
+export default function TripItinerary({ tripId }: { tripId: string }) {
   const [status, setStatus] = useState("draft");
-  const [plan, setPlan] = useState<Itinerary | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [plan, setPlan] = useState<LegacyPlan | ExpandedPlan | null>(null);
+  const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const generation = useRef(0);
+  useEffect(
+    () => () => {
+      generation.current += 1;
+    },
+    [],
+  );
 
   async function startPlanning() {
+    const run = ++generation.current;
     setLoading(true);
-    setError(null);
-
+    setError("");
     try {
-      const response = await fetch(
-        `${API_URL}/api/v1/trips/${tripId}/plan`,
-        { method: "POST" }
-      );
-
-      if (!response.ok) {
-        throw new Error(`Planning request failed: ${response.status}`);
-      }
-
+      await api(`/api/v1/trips/${tripId}/plan`, {});
+      if (generation.current !== run) return;
       setStatus("planning");
-      await pollUntilFinished();
-    } catch (err) {
-      setError(
-        err instanceof Error ? err.message : "Planning failed"
-      );
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function pollUntilFinished() {
-    for (let attempt = 0; attempt < 60; attempt++) {
-      const response = await fetch(
-        `${API_URL}/api/v1/trips/${tripId}`,
-        { cache: "no-store" }
-      );
-
-      if (!response.ok) {
-        throw new Error("Unable to check trip status");
-      }
-
-      const trip = await response.json();
-      setStatus(trip.status);
-
-      if (trip.status === "completed") {
-        const planResponse = await fetch(
-          `${API_URL}/api/v1/trips/${tripId}/itinerary`
+      for (let attempt = 0; attempt < 90; attempt++) {
+        const trip = await api<{ status: string; planning_error?: string }>(
+          `/api/v1/trips/${tripId}`,
         );
-
-        if (!planResponse.ok) {
-          throw new Error("Unable to retrieve itinerary");
+        if (generation.current !== run) return;
+        setStatus(trip.status);
+        if (trip.status === "completed") {
+          const result = await api<LegacyPlan | ExpandedPlan>(
+            `/api/v1/trips/${tripId}/itinerary`,
+          );
+          if (generation.current === run) setPlan(result);
+          return;
         }
-
-        setPlan(await planResponse.json());
-        return;
+        // A retried workflow may not have updated a previously failed row yet.
+        if (trip.status === "failed" && attempt >= 3)
+          throw new Error(
+            trip.planning_error ||
+              "Planning couldn’t finish. Try again or adjust your trip details.",
+          );
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+        if (generation.current !== run) return;
       }
-
-      if (trip.status === "failed") {
-        throw new Error("Trip planning failed");
-      }
-
-      await new Promise((resolve) => setTimeout(resolve, 2000));
+      throw new Error(
+        "Your trip is still being planned. Select ‘Check again’ to pick up where you left off.",
+      );
+    } catch (e) {
+      if (generation.current === run)
+        setError(e instanceof Error ? e.message : "Unable to plan your trip");
+    } finally {
+      if (generation.current === run) setLoading(false);
     }
-
-    throw new Error(
-      "Planning is still running. Refresh and check again."
-    );
   }
 
+  if (plan?.version === 2) return <ExpandedItinerary plan={plan} />;
+  if (plan)
+    return (
+      <section className="itinerary-stack" aria-label="Your itinerary">
+        <Paper className="itinerary-panel">
+          <Typography component="h2" variant="h4">
+            {plan.narrative?.title ?? "Your Voyage itinerary"}
+          </Typography>
+          <Typography color="text.secondary" sx={{ my: 2 }}>
+            {plan.narrative?.summary}
+          </Typography>
+          <Alert severity="info">
+            This saved itinerary uses sample options and prices. No reservations
+            have been made.
+          </Alert>
+          <Typography sx={{ mt: 2 }}>
+            Estimated group total: <strong>${plan.budget.total}</strong> ·
+            Remaining: ${plan.budget.remaining}
+          </Typography>
+        </Paper>
+        <Paper className="itinerary-panel">
+          <Typography component="h3" className="itinerary-section-title">
+            Travel & stay
+          </Typography>
+          <Typography>
+            {plan.flight.provider} · ${plan.flight.price} per traveler
+          </Typography>
+          <Typography>
+            {plan.hotel.name} · ${plan.hotel.price_per_night} per night
+          </Typography>
+        </Paper>
+        {plan.days.map((day) => (
+          <Paper component="article" key={day.date} className="itinerary-panel">
+            <Typography component="h3" className="itinerary-section-title">
+              {day.date}
+            </Typography>
+            {day.activities.length === 0 && (
+              <Typography color="text.secondary">
+                Free time to explore at your own pace.
+              </Typography>
+            )}
+            {day.activities.map((activity) => (
+              <div className="activity-row" key={activity.id}>
+                <Typography>{activity.name}</Typography>
+                <Typography variant="body2" color="text.secondary">
+                  {activity.duration_hours} hours · ${activity.price_per_person}{" "}
+                  per person
+                </Typography>
+              </div>
+            ))}
+            {plan.narrative?.days.find((item) => item.date === day.date)
+              ?.description && (
+              <Typography variant="body2" sx={{ mt: 2 }} color="text.secondary">
+                {
+                  plan.narrative.days.find((item) => item.date === day.date)
+                    ?.description
+                }
+              </Typography>
+            )}
+          </Paper>
+        ))}
+      </section>
+    );
   return (
-    <section className="mt-8 space-y-6">
-      {!plan && (
-        <div className="rounded-xl border border-slate-700 p-6">
-          <p className="mb-4 text-slate-300">
-            Planning status: <strong>{status}</strong>
-          </p>
-
-          <button
-            onClick={startPlanning}
-            disabled={loading}
-            className="rounded-lg bg-sky-500 px-5 py-3 font-semibold text-slate-950 disabled:opacity-50"
-          >
-            {loading ? "Generating itinerary..." : "Generate itinerary"}
-          </button>
-
-          {error && (
-            <p role="alert" className="mt-3 text-red-400">
-              {error}
-            </p>
+    <Paper className="itinerary-panel">
+      <Stack spacing={2.5} sx={{ alignItems: "flex-start" }}>
+        <Stack direction="row" spacing={1.5} sx={{ alignItems: "center" }}>
+          {loading ? (
+            <CircularProgress size={24} />
+          ) : (
+            <AutoAwesomeRounded color="primary" />
           )}
-        </div>
-      )}
-
-      {plan && (
-        <div className="space-y-6">
-          <div className="rounded-xl border border-emerald-800 bg-emerald-950/20 p-6">
-            <h2 className="text-2xl font-bold">
-              Your Voyage itinerary
-            </h2>
-            <p className="mt-2 text-sm text-amber-300">
-              Demo only — synthetic travel options and prices.
-              No reservations have been made.
-            </p>
-
-            <p className="mt-4">
-              Total estimated cost:{" "}
-              <strong>${plan.budget.total}</strong>
-            </p>
-            <p>
-              Remaining budget:{" "}
-              <strong>${plan.budget.remaining}</strong>
-            </p>
-          </div>
-
-          {plan.narrative && (
-            <div className="rounded-xl border border-sky-800 bg-sky-950/20 p-6">
-              <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-sky-400">
-                {plan.narrative.source === "openai"
-                  ? "AI-personalized itinerary"
-                  : "Standard itinerary"}
-              </p>
-              <h2 className="text-2xl font-bold">
-                {plan.narrative.title}
-              </h2>
-              <p className="mt-3 text-slate-300">
-                {plan.narrative.summary}
-              </p>
-            </div>
-          )}
-
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div className="rounded-xl border border-slate-700 p-5">
-              <h3 className="font-semibold">Flight</h3>
-              <p className="mt-2">{plan.flight.provider}</p>
-              <p className="text-slate-400">
-                ${plan.flight.price} per traveler
-              </p>
-            </div>
-
-            <div className="rounded-xl border border-slate-700 p-5">
-              <h3 className="font-semibold">Hotel</h3>
-              <p className="mt-2">{plan.hotel.name}</p>
-              <p className="text-slate-400">
-                ${plan.hotel.price_per_night} per night
-              </p>
-            </div>
-          </div>
-
-          <h3 className="text-xl font-bold">Daily itinerary</h3>
-
-          {plan.days.map((day) => (
-            <div
-              key={day.date}
-              className="rounded-xl border border-slate-700 p-5"
-            >
-              <h4 className="font-semibold">{day.date}</h4>
-
-              {day.activities.length === 0 ? (
-                <p className="mt-2 text-slate-400">
-                  Free time / explore independently
-                </p>
-              ) : (
-                day.activities.map((activity) => (
-                  <div key={activity.id} className="mt-3">
-                    <p>{activity.name}</p>
-                    <p className="text-sm text-slate-400">
-                      {activity.duration_hours} hours ·{" "}
-                      ${activity.price_per_person} per person
-                    </p>
-                  </div>
-                ))
-              )}
-
-              {(() => {
-                const narrative = plan.narrative?.days.find(
-                  (item) => item.date === day.date
-                );
-
-                if (!narrative) return null;
-
-                return (
-                  <div className="mt-4 border-t border-slate-700 pt-4">
-                    <p className="text-sm text-slate-300">
-                      {narrative.description}
-                    </p>
-                    <p className="mt-2 text-sm text-sky-300">
-                      Tip: {narrative.travel_tip}
-                    </p>
-                  </div>
-                );
-              })()}
-            </div>
-          ))}
-        </div>
-      )}
-    </section>
+          <Typography variant="h6" component="h3">
+            {loading ? "A little planning magic…" : "Ready when you are."}
+          </Typography>
+        </Stack>
+        <Typography variant="body2" color="text.secondary">
+          {loading
+            ? "We’re putting together your route, stays, and daily ideas. This can take a few minutes."
+            : "We’ll turn your route into a thoughtful day-by-day itinerary, with estimated costs and searches to help you book."}
+        </Typography>
+        <Button
+          variant="contained"
+          disabled={loading}
+          onClick={startPlanning}
+          startIcon={!loading && <AutoAwesomeRounded />}
+        >
+          {loading
+            ? "Planning your trip…"
+            : error
+              ? status === "failed"
+                ? "Try planning again"
+                : "Check again"
+              : "Create my itinerary"}
+        </Button>
+        {error && (
+          <Alert severity="error" role="alert" sx={{ width: "100%" }}>
+            {error}
+          </Alert>
+        )}
+      </Stack>
+    </Paper>
   );
 }

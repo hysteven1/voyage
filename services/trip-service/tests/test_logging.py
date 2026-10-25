@@ -4,9 +4,10 @@ from unittest.mock import Mock
 from uuid import UUID
 
 import pytest
+from fastapi import Request, Response
+
 from app import main
 from app.logging_config import JsonFormatter
-from fastapi import Request, Response
 
 
 def test_json_formatter(monkeypatch):

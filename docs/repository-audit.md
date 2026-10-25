@@ -41,7 +41,7 @@ uses bundled GeoNames cities and an airportsdata extract, not a paid geocoder.
 Python tests mostly mock DB/provider/Temporal calls. API tests need a syntactically
 valid `DATABASE_URL` at import time, not a live DB. Worker fixtures remove provider
 credentials. Browser tests mock planning APIs but exercise real local autocomplete
-and calendar UI; their clock must be fixed before November 2026. Location tests
+and calendar UI; their clock is already fixed to November 1, 2026. Location tests
 run with Node. Ruff, pytest, TypeScript, ESLint and Next build have local tooling.
 
 Docker access requires sandbox approval (approved for local testing). No Kubernetes

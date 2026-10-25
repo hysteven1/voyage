@@ -38,9 +38,13 @@ existing saved itineraries retain their original renderer and planning behavior.
 
 Both the API and worker optionally use `OPENAI_API_KEY` and `OPENAI_MODEL` (already
 wired through Compose). The API uses structured route suggestions; the worker
-suggests neighborhood activities and optional nearby day trips. With no key or an
-unavailable model, editable offline route suggestions and generic neighborhood
-activity templates are used. Offline country-to-city and route geography coverage
+suggests varied daily clusters across each city, with visit and transfer durations,
+and optional full-day excursions. With no key or an unavailable model, offline route
+suggestions and destination templates are used. Tokyo has a reference itinerary
+covering different districts, Sunshine City, Hakone and a choice of Disney parks;
+other destinations use general outlines. Photo stops such as Hachiko get minutes,
+while theme parks and distant excursions occupy their own days. Restaurants and
+food interests are excluded; meal allowances remain in the cost estimate. Offline country-to-city and route geography coverage
 is deliberately limited; unknown routes retain the entered order and require review.
 AI suggestions are not a verified map, timetable, review feed, or availability feed.
 Notes are advisory; conflicts surfaced by AI require correction. Traveler review
@@ -55,9 +59,10 @@ food, transport and activity allowances; good-value defaults are $110 per room/n
 $65 per car/day, and 15% contingency. Transport uses
 rough distance-based estimates when coordinates are known, otherwise fallback
 allowances. Optional rainy-day swaps are excluded from the total. New UI targets can be exceeded with a clear notice in the itinerary. Existing
-strict/flexible API ceilings remain supported and are never silently exceeded. Booking links are searches, not reservations or guaranteed filtered results.
-Accessibility, actual room/vehicle capacity, child fares, fees and travel restrictions
-must be checked with providers. No live weather or travel search integration is used.
+strict/flexible API ceilings remain supported and are never silently exceeded. Selected flight and stay quotes are mixed with estimates for other expenses when
+SerpApi is configured. Booking links do not create reservations. Accessibility,
+actual room/vehicle capacity, child fares, fees and travel restrictions must be checked
+with providers. There is no live weather integration.
 
 ### Running the update
 
@@ -76,7 +81,8 @@ origins. Existing trip rows and itinerary JSON are preserved. Use workflow versi
 before deploying across long-running active executions in production.
 
 The portable planning contract lives in both Python service build contexts as
-`app/planning.py`; update both copies together. A contract test checks they match.
+`app/planning.py` and `app/day_planning.py`; update both copies together. A contract
+test checks they match.
 
 ### Checks
 
@@ -168,3 +174,49 @@ The new API options are `budget_basis` (`per_person`/`group`), `spending_style`
 API requests default to group amounts and ceiling enforcement; the new UI sends
 per-person targets by default, without requiring an amount. No migration rewrites
 existing budgets or itineraries.
+
+
+### Live flight and stay recommendations
+
+Set `SERPAPI_API_KEY` in the root `.env` for Docker Compose, or in
+`services/planning-worker/.env` when running the worker directly. Both files are
+ignored by Git. The key is only passed to the worker; it is never sent to the browser.
+Recreate the worker after changing its environment:
+
+```bash
+docker compose up -d --build worker web
+```
+
+The worker searches SerpApi's Google Flights engine for each flight leg, checks local
+flight times, dates, connections and overnight preferences, and retrieves a link
+pinned to the selected flight numbers. It keeps a separate filtered alternatives
+link. Stays use Google Hotels searches with dates, guest counts and a 4+ guest rating
+filter, then select a named property with at least 30 reviews. Property details
+supply booking links and rates; separate Google Hotels and dated Airbnb links offer
+alternatives. Vacation rentals also require a reported capacity sufficient for the
+party. This is a Google Hotels/vacation rental integration, not a direct Airbnb feed.
+See the [Google Flights API](https://serpapi.com/google-flights-api) and
+[Google Hotels API](https://serpapi.com/google-hotels-api) documentation.
+
+Retrieved quotes update the budget, including contingency and per-person amounts.
+Multiple-room hotel quotes require manual capacity confirmation; their existing
+group allowance is retained rather than treating one room's rate as a group total.
+When a search fails, has no matching offer, or the key is absent, the plan retains
+estimates and clearly shows that a live recommendation was unavailable. A route
+search is never labeled as a selected-flight link. Dates/filters on fallback search
+links may need reapplying at the booking site. Prices and availability can change.
+
+Each planning activity has a limit of 40 provider requests and at most four concurrent
+searches; a selected option typically needs a search and detail request, plus flight
+location lookups. These calls count against the configured SerpApi account's quota.
+Only new planning runs receive recommendations; saved itineraries are preserved.
+The added selection activity has a Temporal patch marker for existing histories.
+Earlier itinerary schema changes still require checking for active workflows before
+replacing the worker.
+
+The Tokyo reference uses planning duration estimates, not verified opening times or
+reservations. Official references include [Tokyo Disney Resort](https://www.tokyodisneyresort.jp/en/),
+[Sunshine Aquarium](https://sunshinecity.jp/en/aquarium/),
+[Sunshine 60 Observatory](https://sunshinecity.jp/en/observatory/),
+[Shinjuku Gyoen](https://fng.or.jp/shinjuku/en/) and
+[Hakone Open-Air Museum](https://www.hakone-oam.or.jp/en/).

@@ -34,6 +34,7 @@ def personalize_itinerary(data: dict) -> dict:
                     "ONLY the provided itinerary and preferences. "
                     "Do not change selected activities, dates, prices, "
                     "hotels, flights, or budget calculations. "
+                    "Exclude restaurant and meal recommendations, even when legacy preferences include Food. "
                     "Do not invent reservations, confirmed opening "
                     "hours, transport schedules, or provider availability. "
                     "Treat legacy provider options as synthetic examples and version 2 options as unverified planning estimates. "
@@ -81,8 +82,7 @@ def fallback_narrative(trip: dict, plan: dict) -> dict:
     return {
         "title": f"Your trip to {trip['destination']}",
         "summary": (
-            "A sample itinerary based on your dates, "
-            "budget, and selected activities."
+            "A sample itinerary based on your dates, budget, and selected activities."
         ),
         "days": days,
         "source": "fallback",

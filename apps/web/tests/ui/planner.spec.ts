@@ -48,7 +48,7 @@ async function selectLocation(
   await expect(input).toHaveValue(suggestion);
 }
 
-async function mockPlanner(page: Page) {
+async function mockPlanner(page: Page, withOffers = false) {
   const captured: {
     proposal?: TripForm;
     created?: TripForm;
@@ -122,7 +122,41 @@ async function mockPlanner(page: Page) {
             subtotal: "1370",
           },
         ],
-        legs: [],
+        legs: withOffers
+          ? [
+              {
+                origin: "London, UK",
+                destination: "Tokyo, Japan",
+                mode: "flight",
+                departure_date: "2026-11-02",
+                arrival_date: "2026-11-03",
+                estimated_hours: 14,
+                estimated_cost: "1200",
+                search_url: "https://www.google.com/travel/flights?q=fallback",
+                alternatives_url:
+                  "https://www.google.com/travel/flights?tfs=alternatives",
+                restrictions: {
+                  max_stops: 0,
+                  allow_overnight: true,
+                  earliest_departure: null,
+                  latest_arrival: null,
+                },
+                selected_flight: {
+                  airlines: ["Example Air"],
+                  flight_numbers: ["EA 123"],
+                  departure_airport: "LHR",
+                  arrival_airport: "HND",
+                  departure_time: "2026-11-02 18:00",
+                  arrival_time: "2026-11-03 17:00",
+                  stops: 0,
+                  price: "1200",
+                  google_flights_url:
+                    "https://www.google.com/travel/flights?tfs=selected",
+                  checked_at: "2026-11-01T14:00:00Z",
+                },
+              },
+            ]
+          : [],
         stays: [
           {
             location: "Tokyo, Japan",
@@ -134,6 +168,24 @@ async function mockPlanner(page: Page) {
             estimated_cost: "660",
             search_url: "https://www.google.com/search?q=Tokyo+hotels",
             criteria: "Check reviews and transit access.",
+            ...(withOffers
+              ? {
+                  alternatives_url:
+                    "https://www.google.com/travel/search?dates=november",
+                  rental_alternatives_url:
+                    "https://www.airbnb.com/s/Tokyo/homes?checkin=2026-11-02&checkout=2026-11-08",
+                  selected_stay: {
+                    name: "Example Shinjuku Hotel",
+                    rating: 4.6,
+                    reviews: 432,
+                    quoted_total: "660",
+                    booking_url:
+                      "https://example.com/reserve?checkin=2026-11-02",
+                    capacity_note: "Confirm room quantity and final fees.",
+                    checked_at: "2026-11-01T14:00:00Z",
+                  },
+                }
+              : {}),
           },
         ],
         rental_car: null,
@@ -146,10 +198,13 @@ async function mockPlanner(page: Page) {
             activities: [
               {
                 id: "walk",
-                name: "An easy neighborhood walk",
+                name: withOffers
+                  ? "Hachiko statue"
+                  : "An easy neighborhood walk",
                 area: "Central neighborhood",
                 price_per_person: "0",
                 duration_hours: 1,
+                ...(withOffers ? { duration_minutes: 5 } : {}),
                 search_url: "https://www.google.com/search?q=Tokyo+walks",
               },
             ],
@@ -281,6 +336,9 @@ test("already-there hides origin, offers an optional budget, and generates in tw
   ).toBeVisible();
   await expect(
     page.getByRole("button", { name: "Relaxation", exact: true }),
+  ).toHaveCount(0);
+  await expect(
+    page.getByRole("button", { name: "Food", exact: true }),
   ).toHaveCount(0);
   await expect(
     page.getByRole("button", { name: /Good value/ }),
@@ -505,4 +563,82 @@ test("clicking either time field opens the native picker without using its clock
     await expect(input).toHaveAttribute("data-picker-opened", "true");
     await page.keyboard.press("Escape");
   }
+});
+
+test("selected travel options follow the budget with specific and alternative links", async ({
+  page,
+}) => {
+  await page
+    .getByRole("combobox", { name: "From", exact: true })
+    .fill("London, UK");
+  await page
+    .getByRole("combobox", { name: "Where to?", exact: true })
+    .fill("Tokyo, Japan");
+  await chooseDates(page);
+  await page.getByRole("button", { name: "Make it personal" }).click();
+  await mockPlanner(page, true);
+  await page.getByRole("button", { name: "Plan my trip" }).click();
+  const budget = page.getByText("Estimated total · USD", { exact: true });
+  const flights = page.getByRole("heading", {
+    name: "Getting from here to there.",
+  });
+  const stays = page.getByRole("heading", {
+    name: "Somewhere to call home, for a while.",
+  });
+  const days = page.getByRole("heading", {
+    name: "Your days, with room to wander.",
+  });
+  await expect(days).toBeVisible();
+  for (const [before, after] of [
+    [budget, flights],
+    [flights, stays],
+    [stays, days],
+  ]) {
+    const next = await after.elementHandle();
+    expect(
+      await before.evaluate(
+        (node, other) =>
+          Boolean(
+            node.compareDocumentPosition(other!) &
+            Node.DOCUMENT_POSITION_FOLLOWING,
+          ),
+        next,
+      ),
+    ).toBe(true);
+  }
+  await expect(
+    page.getByRole("link", { name: "View selected flight on Google Flights" }),
+  ).toHaveAttribute(
+    "href",
+    "https://www.google.com/travel/flights?tfs=selected",
+  );
+  await expect(
+    page.getByRole("link", { name: /Other flights.*nonstop/ }),
+  ).toHaveAttribute(
+    "href",
+    "https://www.google.com/travel/flights?tfs=alternatives",
+  );
+  await expect(
+    page.getByText("Example Shinjuku Hotel", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("link", { name: "View recommended stay" }),
+  ).toHaveAttribute("href", "https://example.com/reserve?checkin=2026-11-02");
+  await expect(
+    page.getByRole("link", { name: "Other hotels for your dates" }),
+  ).toHaveAttribute(
+    "href",
+    "https://www.google.com/travel/search?dates=november",
+  );
+  await expect(
+    page.getByRole("link", { name: "Vacation rental alternatives on Airbnb" }),
+  ).toHaveAttribute("href", /checkin=2026-11-02/);
+  await expect(
+    page.locator(".activity-row").filter({ hasText: "Hachiko statue" }),
+  ).toContainText("About 5 min");
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  ).toBeTruthy();
 });

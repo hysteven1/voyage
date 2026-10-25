@@ -24,11 +24,14 @@ type Activity = {
   area: string;
   price_per_person: string;
   duration_hours: number;
+  duration_minutes?: number;
+  travel_minutes?: number;
   search_url: string;
   travel_hours?: number;
 };
 export type ExpandedPlan = {
   version: 2;
+  booking_source?: string;
   trip_id: string;
   currency: string;
   data_source: string;
@@ -42,6 +45,20 @@ export type ExpandedPlan = {
     estimated_cost: string;
     search_url: string;
     restrictions: FlightPreferences | null;
+    alternatives_url?: string;
+    selection_status?: string;
+    selected_flight?: {
+      airlines: string[];
+      flight_numbers: string[];
+      departure_airport: string;
+      arrival_airport: string;
+      departure_time: string;
+      arrival_time: string;
+      stops: number;
+      price: string;
+      google_flights_url: string | null;
+      checked_at: string;
+    };
   }[];
   stays: {
     location: string;
@@ -53,6 +70,19 @@ export type ExpandedPlan = {
     estimated_cost: string;
     search_url: string;
     criteria: string;
+    alternatives_url?: string;
+    rental_alternatives_url?: string;
+    selection_status?: string;
+    selected_stay?: {
+      name: string;
+      rating: number;
+      reviews: number;
+      location_rating?: number;
+      quoted_total: string;
+      booking_url: string | null;
+      capacity_note: string;
+      checked_at: string;
+    };
   }[];
   rental_car: {
     searches: { location: string; search_url: string }[];
@@ -65,6 +95,10 @@ export type ExpandedPlan = {
     location: string;
     area?: string;
     kind: string;
+    title?: string;
+    travel_minutes?: number;
+    estimated_minutes?: number;
+    needs_personalization?: boolean;
     activities: Activity[];
     rain_alternative: { name: string; search_url: string } | null;
   }[];
@@ -105,6 +139,13 @@ function Search({
       <NorthEastRounded sx={{ fontSize: 14 }} />
     </a>
   );
+}
+function visitLength(minutes: number) {
+  const hours = Math.floor(minutes / 60);
+  const remainder = minutes % 60;
+  return hours
+    ? `${hours}h${remainder ? ` ${remainder} min` : ""}`
+    : `${minutes} min`;
 }
 const usd = (value: string | null | undefined) =>
   value == null
@@ -264,6 +305,232 @@ export default function ExpandedItinerary({ plan }: { plan: ExpandedPlan }) {
           </AccordionDetails>
         </Accordion>
       </Paper>
+      {plan.legs.length > 0 && (
+        <section>
+          <Typography component="h3" className="itinerary-section-title">
+            Getting from here to there.
+          </Typography>
+          <Stack spacing={2}>
+            {plan.legs.map((leg, i) => (
+              <Paper component="article" className="itinerary-panel" key={i}>
+                <Stack
+                  direction="row"
+                  spacing={1.2}
+                  sx={{ alignItems: "center", mb: 1.5 }}
+                >
+                  <FlightTakeoffRounded color="primary" />
+                  <Typography
+                    component="h4"
+                    variant="subtitle1"
+                    sx={{ fontWeight: 600 }}
+                  >
+                    {leg.origin} → {leg.destination}
+                  </Typography>
+                </Stack>
+                <Typography
+                  variant="body2"
+                  sx={{ textTransform: "capitalize" }}
+                >
+                  {leg.mode} · {dayjs(leg.departure_date).format("MMM D")}
+                  {leg.arrival_date !== leg.departure_date &&
+                    ` – ${dayjs(leg.arrival_date).format("MMM D")}`}
+                </Typography>
+                <Typography
+                  variant="body2"
+                  color="text.secondary"
+                  sx={{ my: 1 }}
+                >
+                  About {leg.estimated_hours} hours · {usd(leg.estimated_cost)}{" "}
+                  estimated for the group
+                </Typography>
+                {leg.restrictions && (
+                  <Typography
+                    variant="caption"
+                    color="text.secondary"
+                    sx={{ display: "block", mb: 2 }}
+                  >
+                    Confirm in search: up to {leg.restrictions.max_stops}{" "}
+                    stop(s)
+                    {leg.restrictions.earliest_departure &&
+                      `; depart after ${leg.restrictions.earliest_departure}`}
+                    {leg.restrictions.latest_arrival &&
+                      `; arrive before ${leg.restrictions.latest_arrival}`}
+                    ;{" "}
+                    {leg.restrictions.allow_overnight
+                      ? "overnight allowed"
+                      : "no overnight flights"}
+                    . Times are local to each airport.
+                  </Typography>
+                )}
+                {leg.selected_flight && (
+                  <Box sx={{ mb: 2 }}>
+                    <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
+                      {leg.selected_flight.airlines.join(" / ")} ·{" "}
+                      {leg.selected_flight.flight_numbers.join(" / ")}
+                    </Typography>
+                    <Typography variant="body2">
+                      {leg.selected_flight.departure_airport}{" "}
+                      {dayjs(leg.selected_flight.departure_time).format(
+                        "MMM D, HH:mm",
+                      )}{" "}
+                      → {leg.selected_flight.arrival_airport}{" "}
+                      {dayjs(leg.selected_flight.arrival_time).format(
+                        "MMM D, HH:mm",
+                      )}
+                    </Typography>
+                    <Typography variant="body2" sx={{ my: 1 }}>
+                      Provider quote: {usd(leg.selected_flight.price)} ·{" "}
+                      {leg.selected_flight.stops === 0
+                        ? "Nonstop"
+                        : `${leg.selected_flight.stops} stop(s)`}
+                    </Typography>
+                    {leg.selected_flight.google_flights_url && (
+                      <Search href={leg.selected_flight.google_flights_url}>
+                        View selected flight on Google Flights
+                      </Search>
+                    )}
+                    <Typography
+                      variant="caption"
+                      color="text.secondary"
+                      sx={{ display: "block", mt: 1 }}
+                    >
+                      Checked{" "}
+                      {dayjs(leg.selected_flight.checked_at).format(
+                        "MMM D, HH:mm",
+                      )}
+                      . Confirm final traveler fares, luggage and availability.
+                    </Typography>
+                  </Box>
+                )}
+                {leg.mode === "flight" && !leg.selected_flight && (
+                  <Typography
+                    variant="caption"
+                    color="text.secondary"
+                    sx={{ display: "block", mb: 1 }}
+                  >
+                    No matching live flight quote was retrieved. Compare options
+                    for these dates below.
+                  </Typography>
+                )}
+                <Search href={leg.alternatives_url ?? leg.search_url}>
+                  {leg.mode === "flight"
+                    ? `Other flights on ${dayjs(leg.departure_date).format("MMM D")} · ${leg.restrictions?.max_stops === 0 ? "nonstop" : `up to ${leg.restrictions?.max_stops ?? 1} stop(s)`}`
+                    : "Compare transport options"}
+                </Search>
+              </Paper>
+            ))}
+          </Stack>
+        </section>
+      )}
+      <section>
+        <Typography component="h3" className="itinerary-section-title">
+          Somewhere to call home, for a while.
+        </Typography>
+        <Stack spacing={2}>
+          {plan.stays.map((stay, i) => (
+            <Paper component="article" className="itinerary-panel" key={i}>
+              <Stack
+                direction="row"
+                spacing={1.2}
+                sx={{ alignItems: "center", mb: 1.5 }}
+              >
+                <HotelRounded color="primary" />
+                <Typography
+                  component="h4"
+                  variant="subtitle1"
+                  sx={{ fontWeight: 600 }}
+                >
+                  {stay.location}
+                </Typography>
+              </Stack>
+              <Typography variant="body2">
+                {stay.area} · {dayjs(stay.check_in).format("MMM D")} –{" "}
+                {dayjs(stay.check_out).format("MMM D")} · {stay.rooms} room(s)
+              </Typography>
+              <Typography variant="body2" sx={{ mt: 1 }}>
+                {usd(stay.estimated_cost)} estimated stay total
+              </Typography>
+              <Typography
+                variant="caption"
+                color="text.secondary"
+                sx={{ display: "block", my: 1.5 }}
+              >
+                {stay.criteria}
+              </Typography>
+              {stay.selected_stay && (
+                <Box sx={{ mb: 2 }}>
+                  <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
+                    {stay.selected_stay.name}
+                  </Typography>
+                  <Typography variant="body2">
+                    {stay.selected_stay.rating}/5 from{" "}
+                    {stay.selected_stay.reviews} reviews
+                  </Typography>
+                  <Typography variant="body2" sx={{ my: 1 }}>
+                    Quoted stay rate: {usd(stay.selected_stay.quoted_total)}
+                  </Typography>
+                  {stay.selected_stay.booking_url && (
+                    <Search href={stay.selected_stay.booking_url}>
+                      View recommended stay
+                    </Search>
+                  )}
+                  <Typography
+                    variant="caption"
+                    color="text.secondary"
+                    sx={{ display: "block", mt: 1 }}
+                  >
+                    {stay.selected_stay.capacity_note} Checked{" "}
+                    {dayjs(stay.selected_stay.checked_at).format(
+                      "MMM D, HH:mm",
+                    )}
+                    .
+                  </Typography>
+                </Box>
+              )}
+              {!stay.selected_stay && (
+                <Typography
+                  variant="caption"
+                  color="text.secondary"
+                  sx={{ display: "block", mb: 1 }}
+                >
+                  No live property recommendation was retrieved. Search your
+                  dates and guest requirements below.
+                </Typography>
+              )}
+              <Stack spacing={1}>
+                <Search href={stay.alternatives_url ?? stay.search_url}>
+                  Other hotels for your dates
+                </Search>
+                {stay.rental_alternatives_url && (
+                  <Search href={stay.rental_alternatives_url}>
+                    Vacation rental alternatives on Airbnb
+                  </Search>
+                )}
+              </Stack>
+            </Paper>
+          ))}
+        </Stack>
+      </section>
+      {plan.rental_car && (
+        <Paper component="section" className="itinerary-panel">
+          <Typography component="h3" className="itinerary-section-title">
+            Freedom on four wheels.
+          </Typography>
+          <Typography variant="body2">
+            Group allowance: {usd(plan.rental_car.estimated_cost)}
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ my: 1.5 }}>
+            {plan.rental_car.notes}
+          </Typography>
+          <Stack spacing={1}>
+            {plan.rental_car.searches.map((search, i) => (
+              <Search key={i} href={search.search_url}>
+                Find a car in {search.location}
+              </Search>
+            ))}
+          </Stack>
+        </Paper>
+      )}
       <section>
         <Typography component="h3" className="itinerary-section-title">
           Your days, with room to wander.
@@ -282,7 +549,7 @@ export default function ExpandedItinerary({ plan }: { plan: ExpandedPlan }) {
                 </div>
                 <Box sx={{ flex: 1 }}>
                   <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
-                    {day.location}
+                    {day.title ?? day.location}
                   </Typography>
                   <Typography variant="caption" color="text.secondary">
                     {dayjs(day.date).format("dddd")}
@@ -302,6 +569,12 @@ export default function ExpandedItinerary({ plan }: { plan: ExpandedPlan }) {
                   sx={{ fontSize: 10 }}
                 />
               </div>
+              {!!day.travel_minutes && (
+                <Typography variant="body2" color="text.secondary">
+                  Allow about {visitLength(day.travel_minutes)} round-trip
+                  travel for this excursion.
+                </Typography>
+              )}
               {day.activities.length === 0 && (
                 <Typography variant="body2" color="text.secondary">
                   A little breathing room for travel, check-out, and
@@ -316,8 +589,11 @@ export default function ExpandedItinerary({ plan }: { plan: ExpandedPlan }) {
                     color="text.secondary"
                     sx={{ mt: 0.7 }}
                   >
-                    About {a.duration_hours} hours · {usd(a.price_per_person)}{" "}
-                    per person
+                    About{" "}
+                    {visitLength(
+                      a.duration_minutes ?? Math.round(a.duration_hours * 60),
+                    )}{" "}
+                    · {usd(a.price_per_person)} per person
                     {a.travel_hours !== undefined &&
                       ` · includes about ${a.travel_hours} hours round-trip travel`}
                   </Typography>
@@ -377,135 +653,6 @@ export default function ExpandedItinerary({ plan }: { plan: ExpandedPlan }) {
           ))}
         </Stack>
       </section>
-      {plan.legs.length > 0 && (
-        <section>
-          <Typography component="h3" className="itinerary-section-title">
-            Getting from here to there.
-          </Typography>
-          <Stack spacing={2}>
-            {plan.legs.map((leg, i) => (
-              <Paper component="article" className="itinerary-panel" key={i}>
-                <Stack
-                  direction="row"
-                  spacing={1.2}
-                  sx={{ alignItems: "center", mb: 1.5 }}
-                >
-                  <FlightTakeoffRounded color="primary" />
-                  <Typography
-                    component="h4"
-                    variant="subtitle1"
-                    sx={{ fontWeight: 600 }}
-                  >
-                    {leg.origin} → {leg.destination}
-                  </Typography>
-                </Stack>
-                <Typography
-                  variant="body2"
-                  sx={{ textTransform: "capitalize" }}
-                >
-                  {leg.mode} · {dayjs(leg.departure_date).format("MMM D")}
-                  {leg.arrival_date !== leg.departure_date &&
-                    ` – ${dayjs(leg.arrival_date).format("MMM D")}`}
-                </Typography>
-                <Typography
-                  variant="body2"
-                  color="text.secondary"
-                  sx={{ my: 1 }}
-                >
-                  About {leg.estimated_hours} hours · {usd(leg.estimated_cost)}{" "}
-                  estimated for the group
-                </Typography>
-                {leg.restrictions && (
-                  <Typography
-                    variant="caption"
-                    color="text.secondary"
-                    sx={{ display: "block", mb: 2 }}
-                  >
-                    Confirm in search: up to {leg.restrictions.max_stops}{" "}
-                    stop(s)
-                    {leg.restrictions.earliest_departure &&
-                      `; depart after ${leg.restrictions.earliest_departure}`}
-                    {leg.restrictions.latest_arrival &&
-                      `; arrive before ${leg.restrictions.latest_arrival}`}
-                    ;{" "}
-                    {leg.restrictions.allow_overnight
-                      ? "overnight allowed"
-                      : "no overnight flights"}
-                    . Times are local to each airport.
-                  </Typography>
-                )}
-                <Search href={leg.search_url}>
-                  {leg.mode === "flight"
-                    ? "Explore Google Flights"
-                    : "Compare transport options"}
-                </Search>
-              </Paper>
-            ))}
-          </Stack>
-        </section>
-      )}
-      <section>
-        <Typography component="h3" className="itinerary-section-title">
-          Somewhere to call home, for a while.
-        </Typography>
-        <Stack spacing={2}>
-          {plan.stays.map((stay, i) => (
-            <Paper component="article" className="itinerary-panel" key={i}>
-              <Stack
-                direction="row"
-                spacing={1.2}
-                sx={{ alignItems: "center", mb: 1.5 }}
-              >
-                <HotelRounded color="primary" />
-                <Typography
-                  component="h4"
-                  variant="subtitle1"
-                  sx={{ fontWeight: 600 }}
-                >
-                  {stay.location}
-                </Typography>
-              </Stack>
-              <Typography variant="body2">
-                {stay.area} · {dayjs(stay.check_in).format("MMM D")} –{" "}
-                {dayjs(stay.check_out).format("MMM D")} · {stay.rooms} room(s)
-              </Typography>
-              <Typography variant="body2" sx={{ mt: 1 }}>
-                {usd(stay.estimated_cost)} estimated stay total
-              </Typography>
-              <Typography
-                variant="caption"
-                color="text.secondary"
-                sx={{ display: "block", my: 1.5 }}
-              >
-                {stay.criteria}
-              </Typography>
-              <Search href={stay.search_url}>
-                Compare stays & recent reviews
-              </Search>
-            </Paper>
-          ))}
-        </Stack>
-      </section>
-      {plan.rental_car && (
-        <Paper component="section" className="itinerary-panel">
-          <Typography component="h3" className="itinerary-section-title">
-            Freedom on four wheels.
-          </Typography>
-          <Typography variant="body2">
-            Group allowance: {usd(plan.rental_car.estimated_cost)}
-          </Typography>
-          <Typography variant="body2" color="text.secondary" sx={{ my: 1.5 }}>
-            {plan.rental_car.notes}
-          </Typography>
-          <Stack spacing={1}>
-            {plan.rental_car.searches.map((search, i) => (
-              <Search key={i} href={search.search_url}>
-                Find a car in {search.location}
-              </Search>
-            ))}
-          </Stack>
-        </Paper>
-      )}
       <Accordion
         variant="outlined"
         sx={{

@@ -37,9 +37,10 @@ def approved(trip):
 
 def test_contract_copies_match():
     root = Path(__file__).resolve().parents[3]
-    assert (root / "services/trip-service/app/planning.py").read_bytes() == (
-        root / "services/planning-worker/app/planning.py"
-    ).read_bytes()
+    for filename in ("planning.py", "day_planning.py"):
+        assert (root / "services/trip-service/app" / filename).read_bytes() == (
+            root / "services/planning-worker/app" / filename
+        ).read_bytes()
 
 
 def test_country_route_and_dates(trip):
@@ -105,7 +106,8 @@ def test_pace_and_rain_swaps(trip):
             for d in plan["days"]
             if d["rain_alternative"]
         )
-    assert counts == [1, 2, 3]
+    assert counts == sorted(set(counts))
+    assert counts[1] >= 4
 
 
 def test_budget_arithmetic_and_flexible_ceiling(trip):

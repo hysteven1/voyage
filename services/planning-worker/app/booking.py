@@ -37,11 +37,15 @@ def safe_link(value, google_product=None):
         return None
     if url.hostname.endswith("serpapi.com"):
         return None
-    if google_product and (
-        url.hostname not in {"google.com", "www.google.com"}
-        or not url.path.startswith(f"/travel/{google_product}")
-    ):
-        return None
+    if google_product:
+        paths = (f"/travel/{google_product}",)
+        if google_product == "hotels":
+            paths += ("/travel/search",)
+        if url.hostname not in {
+            "google.com",
+            "www.google.com",
+        } or not url.path.startswith(paths):
+            return None
     return value
 
 
@@ -280,7 +284,9 @@ class SerpApi:
             "rating": 8,
         }
         if options["child_ages"]:
-            params["children_ages"] = ",".join(map(str, options["child_ages"]))
+            params["children_ages"] = ",".join(
+                str(max(1, age)) for age in options["child_ages"]
+            )
         if options["lodging"] == "apartment":
             params.update(vacation_rentals="true", bedrooms=options["rooms"])
         result = self.query(**params)
@@ -325,7 +331,8 @@ class SerpApi:
                     "checkin": stay["check_in"],
                     "checkout": stay["check_out"],
                     "adults": options["adults"],
-                    "children": len(options["child_ages"]),
+                    "children": sum(age >= 2 for age in options["child_ages"]),
+                    "infants": sum(age < 2 for age in options["child_ages"]),
                     "min_bedrooms": options["rooms"],
                 }
             )
@@ -335,7 +342,7 @@ class SerpApi:
             or "https://www.google.com/travel/hotels?"
             + urlencode(
                 {
-                    "q": f"{stay['location']} hotels {stay['check_in']} to {stay['check_out']} {options['adults']} adults {len(options['child_ages'])} children 4 star reviews"
+                    "q": f"{stay['location']} hotels {stay['check_in']} to {stay['check_out']} {options['adults']} adults {len(options['child_ages'])} children 4+ guest rating"
                 }
             ),
             "rental_alternatives_url": airbnb,
@@ -349,10 +356,17 @@ class SerpApi:
             != selected["property_token"]
         ):
             raise ProviderError("Property detail mismatch")
-        prices = [p for p in details.get("prices", []) if safe_link(p.get("link"))]
+        prices = [
+            p
+            for p in details.get("prices", [])
+            if safe_link(p.get("link")) and amount(p.get("total_rate")) is not None
+        ]
+        quoted_price = (
+            min(prices, key=lambda p: amount(p["total_rate"])) if prices else None
+        )
         booking_url = (
-            prices[0]["link"]
-            if prices
+            quoted_price["link"]
+            if quoted_price
             else safe_link(details.get("link")) or safe_link(selected.get("link"))
         )
         return {
@@ -365,7 +379,10 @@ class SerpApi:
                 "reviews": selected["reviews"],
                 "location_rating": selected.get("location_rating"),
                 "quoted_total": str(
-                    amount(details.get("total_rate")) or amount(selected["total_rate"])
+                    amount(quoted_price["total_rate"])
+                    if quoted_price
+                    else amount(details.get("total_rate"))
+                    or amount(selected["total_rate"])
                 ),
                 "booking_url": booking_url,
                 "price_basis": "provider_search_stay",
@@ -455,6 +472,10 @@ def select_travel_options(data):
             collection[index].update(update)
             if update.get("selected_flight"):
                 collection[index]["estimated_cost"] = update["selected_flight"]["price"]
+                if update["selected_flight"].get("duration_minutes"):
+                    collection[index]["estimated_hours"] = round(
+                        update["selected_flight"]["duration_minutes"] / 60, 1
+                    )
             if update.get("selected_stay") and (
                 trip["options"]["rooms"] == 1
                 or trip["options"]["lodging"] == "apartment"
@@ -462,7 +483,10 @@ def select_travel_options(data):
                 collection[index]["estimated_cost"] = update["selected_stay"][
                     "quoted_total"
                 ]
-    refresh_estimates(plan)
+    if any(leg.get("selected_flight") for leg in plan["legs"]) or any(
+        stay.get("selected_stay") for stay in plan["stays"]
+    ):
+        refresh_estimates(plan)
     plan["booking_source"] = "serpapi"
     plan["assumptions"].append(
         "Selected travel options were retrieved from SerpApi. Prices and availability can change; group, room and luggage fees must be confirmed on the booking page."

@@ -72,7 +72,9 @@ class PlanTripWorkflow:
                 )
 
             if trip.get("options") and workflow.patched("live-travel-selection-v1"):
-                plan = await execute(select_travel_options, {"trip": trip, "plan": plan}, timeout=300)
+                plan = await execute(
+                    select_travel_options, {"trip": trip, "plan": plan}, timeout=300
+                )
 
             # Personalization is optional enrichment.
             # A failure must not invalidate the budget-safe plan.

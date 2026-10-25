@@ -38,18 +38,26 @@ def advice():
             places.CityAdvice(
                 location="Paris, France",
                 area="Central neighborhood",
-                activities=[
-                    places.Place(
-                        name="Nearby museum", category="culture", estimated_price=10
+                days=[
+                    places.DayIdea(
+                        title=f"Neighborhood {i}",
+                        area=f"District {i}",
+                        full_day=False,
+                        travel_minutes=0,
+                        rain="Indoor gallery",
+                        activities=[
+                            places.Place(
+                                name=f"Museum {i}",
+                                category="culture",
+                                area=f"District {i}",
+                                estimated_price=10,
+                                duration_minutes=120,
+                                travel_minutes=15,
+                            )
+                        ],
                     )
+                    for i in range(7)
                 ],
-                rain="Indoor local gallery",
-                day_trip=places.DayTrip(
-                    name="Nearby excursion",
-                    area="Nearby district",
-                    travel_hours=1.5,
-                    estimated_price=30,
-                ),
             )
         ],
         conflicts=[],
@@ -69,11 +77,9 @@ def test_optional_places_and_grouped_days(trip, monkeypatch):
     for day in plan["days"]:
         if day["activities"]:
             assert {a["area"] for a in day["activities"]} == {day["area"]}
-    arrival = plan["days"][0]
-    assert arrival["kind"] == "arrival"
-    assert "Easy" in arrival["activities"][0]["name"]
-    excursion = plan["days"][2]["activities"]
-    assert len(excursion) == 1 and excursion[0]["travel_hours"] == 1.5
+    assert plan["days"][0]["kind"] == "full"
+    names = [a["name"] for d in plan["days"] for a in d["activities"]]
+    assert len(names) == len(set(names))
     assert client.return_value.responses.parse.call_args.kwargs["store"] is False
 
 
@@ -87,7 +93,7 @@ def test_invalid_or_failed_places_fall_back(trip, monkeypatch):
     assert places.suggest_places(trip) == {}
     client.return_value.responses.parse.side_effect = None
     invalid = advice()
-    invalid.cities[0].day_trip.travel_hours = 20
+    invalid.cities[0].days[0].activities[0].duration_minutes = 1000
     client.return_value.responses.parse.return_value = SimpleNamespace(
         output_parsed=invalid
     )
@@ -126,12 +132,15 @@ def test_expanded_workflow_completes_or_records_failure(trip, monkeypatch, fail)
                     "Estimated cost exceeds your ceiling", non_retryable=True
                 )
             return build_plan(trip)
+        if fn is workflows.select_travel_options:
+            return arg["plan"]
         if fn is workflows.personalize_itinerary:
             return {"title": "Trip", "days": []}
         return None
 
     monkeypatch.setattr(workflows.workflow, "execute_activity", execute)
     monkeypatch.setattr(workflows.workflow, "logger", Mock())
+    monkeypatch.setattr(workflows.workflow, "patched", lambda _: True)
     if fail:
         with pytest.raises(ApplicationError, match="exceeds"):
             asyncio.run(workflows.PlanTripWorkflow().run(trip["id"]))

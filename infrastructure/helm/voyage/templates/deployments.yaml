@@ -55,13 +55,25 @@ spec:
             {{- if eq $component "web" }}
             - name: API_INTERNAL_URL
               value: http://{{ include "voyage.name" $root }}-api:8000
+            {{- else }}
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef: {name: {{ $root.Values.existingSecret }}, key: DATABASE_URL}
+            {{- range $key := list "OPENAI_API_KEY" "TEMPORAL_API_KEY" }}
+            - name: {{ $key }}
+              valueFrom:
+                secretKeyRef: {name: {{ $root.Values.existingSecret }}, key: {{ $key }}, optional: true}
+            {{- end }}
+            {{- if eq $component "worker" }}
+            - name: SERPAPI_API_KEY
+              valueFrom:
+                secretKeyRef: {name: {{ $root.Values.existingSecret }}, key: SERPAPI_API_KEY, optional: true}
+            {{- end }}
             {{- end }}
           {{- if ne $component "web" }}
           envFrom:
             - configMapRef:
                 name: {{ include "voyage.name" $root }}
-            - secretRef:
-                name: {{ $root.Values.existingSecret }}
           {{- end }}
           resources:
             {{- toYaml (index $root.Values.resources $component) | nindent 12 }}

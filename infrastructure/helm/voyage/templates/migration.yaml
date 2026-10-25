@@ -37,8 +37,10 @@ spec:
           image: {{ include "voyage.image" .Values.images.api | quote }}
           imagePullPolicy: {{ .Values.imagePullPolicy }}
           command: [python, -m, app.migrate]
-          envFrom:
-            - secretRef: {name: {{ .Values.existingSecret }}}
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef: {name: {{ .Values.existingSecret }}, key: DATABASE_URL}
           securityContext:
             {{- include "voyage.security" . | nindent 12 }}
           resources:

@@ -46,9 +46,13 @@ kubectl --context kind-voyage-infra -n argocd port-forward svc/argocd-server 808
 
 The installation is pinned to Argo CD v3.5.6's full source commit. Review upstream
 security updates before installing later. Open https://localhost:8080 and accept
-the local development certificate. Retrieve the initial admin password locally
-using the official Argo CD initial-login procedure, change it, and do not include
-it in repository files, screenshots or logs. No ingress for Argo is configured.
+the local development certificate. Retrieve the initial admin password locally, change it after login, and do not
+include it in repository files, screenshots or logs:
+
+```bash
+kubectl --context kind-voyage-infra -n argocd get secret argocd-initial-admin-secret \
+  -o jsonpath='{.data.password}' | base64 --decode
+``` No ingress for Argo is configured.
 
 If you installed Voyage with Helm first, wait for active workflows to finish, then
 uninstall only the application (`helm uninstall voyage --kube-context

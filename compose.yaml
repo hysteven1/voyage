@@ -1,6 +1,6 @@
 services:
   postgres:
-    image: postgres:17
+    image: postgres:17@sha256:b8faeff7712663c2773a190181e1246e37e364b887611c04658c28b44e2408fe
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-voyage}
@@ -13,13 +13,13 @@ services:
     healthcheck:
       test:
         - CMD-SHELL
-        - pg_isready -U voyage -d voyage
+        - pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"
       interval: 5s
       timeout: 5s
       retries: 10
 
   temporal:
-    image: temporalio/temporal:latest
+    image: temporalio/temporal@sha256:ad4c82c97bd12b417d1ea942610dbcd511afb250c4d5ed26c694009533df447e
     user: "0:0"
     entrypoint: ["temporal"]
     command:
@@ -58,7 +58,7 @@ services:
       context: ./services/trip-service
     command: ["python", "-m", "app.migrate"]
     environment:
-      DATABASE_URL: postgresql+psycopg://voyage:${POSTGRES_PASSWORD:-voyage_local_dev}@postgres:5432/voyage
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-voyage}:${POSTGRES_PASSWORD:-voyage_local_dev}@postgres:5432/${POSTGRES_DB:-voyage}
     depends_on:
       postgres:
         condition: service_healthy
@@ -74,7 +74,7 @@ services:
       OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}
       OPENAI_PLANNING_MODEL: ${OPENAI_PLANNING_MODEL:-gpt-6.1-sol}
       OPENAI_RECOVERY_MODEL: ${OPENAI_RECOVERY_MODEL:-gpt-4o-mini}
-      DATABASE_URL: postgresql+psycopg://voyage:${POSTGRES_PASSWORD:-voyage_local_dev}@postgres:5432/voyage
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-voyage}:${POSTGRES_PASSWORD:-voyage_local_dev}@postgres:5432/${POSTGRES_DB:-voyage}
       TEMPORAL_ADDRESS: temporal:7233
     ports:
       - "127.0.0.1:8000:8000"
@@ -95,13 +95,20 @@ services:
         condition: service_healthy
 
   worker:
+    stop_grace_period: 240s
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://localhost:8081/health/ready', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
     build:
       context: ./services/planning-worker
     restart: unless-stopped
     environment:
       SERVICE_NAME: planning-worker
       SERPAPI_API_KEY: ${SERPAPI_API_KEY:-}
-      DATABASE_URL: postgresql+psycopg://voyage:${POSTGRES_PASSWORD:-voyage_local_dev}@postgres:5432/voyage
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-voyage}:${POSTGRES_PASSWORD:-voyage_local_dev}@postgres:5432/${POSTGRES_DB:-voyage}
       TEMPORAL_ADDRESS: temporal:7233
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}

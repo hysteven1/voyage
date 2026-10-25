@@ -56,3 +56,12 @@ Manual prerequisites: enable Actions, permit this repository's token to publish
 packages, and check package access inheritance after first publication. For private
 images, provision a namespace-scoped imagePullSecret from an external credential
 store; never commit it. Remote publication was not performed during local validation.
+
+The Infrastructure job runs the checksum-verified tool installer, actionlint,
+Compose validation, both Helm environments and Kubernetes schema validation,
+including the exact GitOps environment values. `Integration smoke` is manually
+triggered to keep routine PR checks lightweight. It creates a fresh local kind
+cluster on the runner, tests the synthetic-provider flow through actual services,
+and server-validates Argo resources. Only that disposable CI cluster is deleted;
+the local script leaves its cluster for inspection. GitHub-hosted execution of
+these workflows still needs the changes pushed to the repository.

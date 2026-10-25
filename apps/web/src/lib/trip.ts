@@ -47,7 +47,7 @@ export type TripForm = {
   options: Options;
 };
 export const API_URL =
-  process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+  process.env.NEXT_PUBLIC_API_URL ?? "";
 export const flightDefaults: FlightPreferences = {
   departure_scope: "first_flight",
   arrival_scope: "return_home",

@@ -30,3 +30,29 @@ In Settings → Rules → Rulesets, target `main`:
 Dependabot tracks GitHub Actions, npm, uv and Docker weekly. Review lockfile and
 major-version changes. Do not enable automatic merges merely to reduce PR counts.
 No repository settings have been changed by this implementation.
+
+## Publishing
+
+`Publish images` runs after a successful main-branch CI run, or on `vX.Y.Z` tag
+pushes. Tag pushes run the reusable CI workflow first; the publishing job also
+verifies the tagged commit belongs to main. Pull requests cannot publish. Tags
+outside the stable semantic-version format are rejected. All actions are pinned
+to resolved full commit SHAs (reviewed versions are noted in comments).
+
+Images: `ghcr.io/hysteven1/voyage-api`, `voyage-worker`, `voyage-web`.
+Each receives `sha-<full 40-character commit>`; a release also receives `X.Y.Z`.
+No `latest` tag is published. SHA tags identify source, but registries can overwrite
+tags: use the resulting digest in production values for strict content immutability.
+The pipeline attaches OCI source/revision metadata, provenance and SBOM attestations.
+BuildKit caches are scoped per service. Current builds target linux/amd64 (including
+Docker Desktop on x86 WSL2); other cluster architectures require an explicit build.
+
+Only the publishing job has `packages: write`. It authenticates with the ephemeral
+`GITHUB_TOKEN`. No PAT, provider credential or Kubernetes credential is needed.
+CI never changes the Helm values or deploys a cluster. Promotion is a reviewed Git
+change to image tags/digests; production synchronization is manual.
+
+Manual prerequisites: enable Actions, permit this repository's token to publish
+packages, and check package access inheritance after first publication. For private
+images, provision a namespace-scoped imagePullSecret from an external credential
+store; never commit it. Remote publication was not performed during local validation.

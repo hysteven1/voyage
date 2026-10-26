@@ -15,6 +15,7 @@ import {
 import ExpandMoreRounded from "@mui/icons-material/ExpandMoreRounded";
 import NorthEastRounded from "@mui/icons-material/NorthEastRounded";
 import FlightTakeoffRounded from "@mui/icons-material/FlightTakeoffRounded";
+import DirectionsCarRounded from "@mui/icons-material/DirectionsCarRounded";
 import TrainRounded from "@mui/icons-material/TrainRounded";
 import HotelRounded from "@mui/icons-material/HotelRounded";
 import UmbrellaRounded from "@mui/icons-material/UmbrellaRounded";
@@ -415,6 +416,8 @@ export default function ExpandedItinerary({ plan }: { plan: ExpandedPlan }) {
                 >
                   {leg.mode === "train" ? (
                     <TrainRounded color="primary" aria-label="Train" />
+                  ) : leg.mode === "drive" ? (
+                    <DirectionsCarRounded color="primary" aria-label="Drive" />
                   ) : (
                     <FlightTakeoffRounded color="primary" aria-label="Flight" />
                   )}

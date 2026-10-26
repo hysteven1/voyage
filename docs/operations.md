@@ -59,6 +59,10 @@ been configured or tested.
   visibility. Do not expose the backend, database, Temporal gRPC/UI or Argo UI.
 - Ingress is disabled by default; configure TLS and access protection before enabling
   it. No DNS, certificate issuer, public load balancer or cloud resource is created.
+- Compose requires an explicit POSTGRES_PASSWORD with no hardcoded fallback. The
+  old development default remains in Git history; if an initialized database uses
+  it, rotate the role password and update its clients together before hosting.
+  Removing a fallback from current source does not rotate existing credentials.
 - Runtime Secrets are external to Git and Helm values. Kubernetes base64 is not
   encryption; restrict RBAC and enable encryption at rest/managed secret storage
   for a real cluster. Secret env updates require Pod restarts.

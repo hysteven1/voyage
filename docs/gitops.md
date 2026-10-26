@@ -52,20 +52,24 @@ include it in repository files, screenshots or logs:
 ```bash
 kubectl --context kind-voyage-infra -n argocd get secret argocd-initial-admin-secret \
   -o jsonpath='{.data.password}' | base64 --decode
-``` No ingress for Argo is configured.
+```
 
-If you installed Voyage with Helm first, wait for active workflows to finish, then
-uninstall only the application (`helm uninstall voyage --kube-context
-kind-voyage-infra -n voyage-dev`) before the first Argo sync. The separately managed
-PostgreSQL/Temporal StatefulSets and their data remain. Do not uninstall dependencies
-or delete PVCs. Once Argo owns the application, manage it through Git/Argo only.
+No ingress for Argo is configured.
+
+If you installed Voyage with Helm first, wait for active workflows to finish and
+review the Argo diff before the handoff. With the same release name and namespace,
+Argo can adopt the existing application resources; this path was verified locally
+without uninstalling the app or changing dependency storage. The Helm release
+record remains, but once Argo owns the application, do not use Helm to upgrade,
+roll back or uninstall those resources. PostgreSQL/Temporal stay separately managed.
 
 In Argo, review the diff and select **Sync** for `voyage`, initially without prune.
 The Helm pre-install/pre-upgrade migration Job maps to Argo PreSync; it uses only
 the precreated Secret and existing DB, so first sync works without chart resources.
 Wait for Synced/Healthy, then run `python3 scripts/smoke-trip.py` through the web
-port-forward. This actual synchronization is a manual remaining step: local
-validation does not push your changes or prove remote repository/image access.
+port-forward. A manual sync from public GitHub main was verified locally on
+2026-10-25; it reached Synced/Healthy and the synthetic smoke test passed afterward.
+This used locally loaded images, not GHCR pulls, and did not enable auto-sync.
 
 ## Promotion and rollback
 
@@ -96,3 +100,7 @@ only the two pinned upstream CRDs into the dedicated kind cluster and performs
 server-side dry-run validation of the Application/Project. It does not install an
 Argo controller, authenticate to GitHub, pull GHCR images, or synchronize a release.
 The manual Integration smoke workflow includes this validation.
+
+The local Argo controller was subsequently installed and successfully fetched/synced
+the public repository. See [verification evidence](validation.md) for the exact
+revision and [Step 13](deployment-plan.md) for remaining live-deployment work.

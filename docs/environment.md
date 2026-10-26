@@ -8,7 +8,7 @@ credentials. Keep existing database passwords when reusing initialized volumes.
 | --- | --- | --- |
 | DATABASE_URL | API, migrations, worker | Required SQLAlchemy `postgresql+psycopg://...` URL; use TLS for external DBs |
 | POSTGRES_USER / POSTGRES_DB | Compose PostgreSQL and URLs | voyage / voyage; changing these does not rename initialized DBs |
-| POSTGRES_PASSWORD | Compose PostgreSQL and URLs | Existing local default only; choose a URL-safe password for a new environment |
+| POSTGRES_PASSWORD | Compose PostgreSQL and URLs | Required, no fallback; choose a unique URL-safe password for a new environment |
 | API_INTERNAL_URL | Next server | http://localhost:8000 for native dev; Compose/Helm point to internal API |
 | NEXT_PUBLIC_API_URL | Browser bundle | Empty/same-origin by default; optional build-time direct-API override |
 | TEMPORAL_ADDRESS | API/worker | localhost:7233 natively; temporal:7233 in local containers |
@@ -43,3 +43,9 @@ percent characters for ConfigParser interpolation. Compose's assembled URL expec
 URL-safe role/password/database components; for other credentials, provide a proper
 DATABASE_URL via a reviewed override. Models/provider availability are account-
 dependent; infrastructure validation does not verify access to a selected model.
+
+Compose rejects a missing or empty POSTGRES_PASSWORD. Changing `.env` does not
+change the password inside an initialized PostgreSQL volume: rotate the database
+role and dependent configuration together, without deleting or resetting the volume.
+The historical development fallback is publicly visible and must not be reused
+for a hosted database or another service.

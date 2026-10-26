@@ -4,7 +4,7 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-voyage}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-voyage_local_dev}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env before starting Voyage}
       POSTGRES_DB: ${POSTGRES_DB:-voyage}
     ports:
       - "127.0.0.1:5432:5432"
@@ -58,7 +58,7 @@ services:
       context: ./services/trip-service
     command: ["python", "-m", "app.migrate"]
     environment:
-      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-voyage}:${POSTGRES_PASSWORD:-voyage_local_dev}@postgres:5432/${POSTGRES_DB:-voyage}
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-voyage}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env before starting Voyage}@postgres:5432/${POSTGRES_DB:-voyage}
     depends_on:
       postgres:
         condition: service_healthy
@@ -74,7 +74,7 @@ services:
       OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}
       OPENAI_PLANNING_MODEL: ${OPENAI_PLANNING_MODEL:-gpt-6.1-sol}
       OPENAI_RECOVERY_MODEL: ${OPENAI_RECOVERY_MODEL:-gpt-4o-mini}
-      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-voyage}:${POSTGRES_PASSWORD:-voyage_local_dev}@postgres:5432/${POSTGRES_DB:-voyage}
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-voyage}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env before starting Voyage}@postgres:5432/${POSTGRES_DB:-voyage}
       TEMPORAL_ADDRESS: temporal:7233
     ports:
       - "127.0.0.1:8000:8000"
@@ -108,7 +108,7 @@ services:
     environment:
       SERVICE_NAME: planning-worker
       SERPAPI_API_KEY: ${SERPAPI_API_KEY:-}
-      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-voyage}:${POSTGRES_PASSWORD:-voyage_local_dev}@postgres:5432/${POSTGRES_DB:-voyage}
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-voyage}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env before starting Voyage}@postgres:5432/${POSTGRES_DB:-voyage}
       TEMPORAL_ADDRESS: temporal:7233
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}

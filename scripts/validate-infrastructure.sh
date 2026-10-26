@@ -4,7 +4,9 @@ chart=infrastructure/helm/voyage
 rendered=$(mktemp -d)
 trap 'rm -rf "$rendered"' EXIT
 actionlint .github/workflows/*.yml
-docker compose config --quiet
+# Configuration validation needs no real credentials or local .env file.
+POSTGRES_PASSWORD="$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')" \
+  docker compose --env-file /dev/null config --quiet
 helm lint "$chart" -f "$chart/values-development.yaml"
 helm template voyage "$chart" -n voyage-dev -f "$chart/values-development.yaml" > "$rendered/development.yaml"
 helm lint "$chart" -f "$chart/values-production.yaml" \

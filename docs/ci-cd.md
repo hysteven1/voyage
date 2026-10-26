@@ -55,7 +55,8 @@ change to image tags/digests; production synchronization is manual.
 Manual prerequisites: enable Actions, permit this repository's token to publish
 packages, and check package access inheritance after first publication. For private
 images, provision a namespace-scoped imagePullSecret from an external credential
-store; never commit it. Remote publication was not performed during local validation.
+store; never commit it. The initial local checks did not publish images. A subsequent GitHub main run
+successfully published all three images; see [verification evidence](validation.md).
 
 The Infrastructure job runs the checksum-verified tool installer, actionlint,
 Compose validation, both Helm environments and Kubernetes schema validation,
@@ -63,5 +64,5 @@ including the exact GitOps environment values. `Integration smoke` is manually
 triggered to keep routine PR checks lightweight. It creates a fresh local kind
 cluster on the runner, tests the synthetic-provider flow through actual services,
 and server-validates Argo resources. Only that disposable CI cluster is deleted;
-the local script leaves its cluster for inspection. GitHub-hosted execution of
-these workflows still needs the changes pushed to the repository.
+the local script leaves its cluster for inspection. GitHub-hosted CI and publishing have subsequently succeeded. The manual integration
+workflow has not yet been run on GitHub; see [verification evidence](validation.md).

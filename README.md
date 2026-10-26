@@ -173,9 +173,10 @@ production image builds. A real kind deployment exercised the web proxy, API,
 PostgreSQL, Temporal, and worker through persisted itinerary generation. Helm
 upgrades reran migrations and preserved an existing itinerary.
 
-GitHub-hosted workflow execution, GHCR publication, and actual Argo synchronization
-remain to be verified after the changes are pushed. Argo manifests have passed
-server-side validation against the official CRDs. See the
+GitHub CI and all three GHCR publishing jobs have also succeeded. Local Argo CD
+fetched the public repository and completed a manual sync to Synced/Healthy;
+the planning smoke test was repeated after deployment. Live hosting, paid provider
+flows, and automatic image promotion remain separate deployment work. See the
 [verification report](docs/validation.md) for results and validation boundaries.
 
 ## Run locally
@@ -186,7 +187,7 @@ the database password associated with initialized volumes.
 ```bash
 # From the repository root; creates a template only if .env is absent.
 test -f .env || cp .env.example .env
-# For a new database, choose POSTGRES_PASSWORD before its first startup.
+# Set the required POSTGRES_PASSWORD before starting a new database.
 # Add OPENAI_API_KEY locally to use the expanded web planner.
 docker compose config --quiet
 docker compose up -d --build
@@ -245,4 +246,5 @@ manageable and identify concrete areas for future work.
 - [Environment variables](docs/environment.md)
 - [Operations, observability, and security](docs/operations.md)
 - [Verification evidence](docs/validation.md)
+- [Step 13 live deployment plan](docs/deployment-plan.md)
 - [Portfolio demonstration walkthrough](docs/portfolio.md)
